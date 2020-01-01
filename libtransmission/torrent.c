@@ -947,14 +947,27 @@ static void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
         tor->downloadDir = tr_strdup(dir);
     }
 
-    if (!tr_ctorGetIncompleteDir(ctor, &dir))
+    /* If a download dir other than the default was specified,
+    ** don't use the incomplete dir.
+    */
+    tr_logAddInfo ("Default download dir: %s", tr_sessionGetDownloadDir(tor->session));
+    tr_logAddTorInfo (tor, "Torrent download dir: %s", tor->downloadDir);
+    if (strcmp (tor->downloadDir, tr_sessionGetDownloadDir(tor->session)) == 0)
     {
-        dir = tr_sessionGetIncompleteDir(session);
+        if (!tr_ctorGetIncompleteDir (ctor, &dir))
+        {
+            dir = tr_sessionGetIncompleteDir (session);
+        }
+        if (tr_sessionIsIncompleteDirEnabled (session))
+        {
+            tor->incompleteDir = tr_strdup (dir);
+        }
+        tr_logAddTorInfo (tor, "No special download dir specified --> use incomplete dir '%s'", tor->incompleteDir);
     }
-
-    if (tr_sessionIsIncompleteDirEnabled(session))
+    else
     {
-        tor->incompleteDir = tr_strdup(dir);
+        tor->incompleteDir = NULL;
+        tr_logAddTorInfo (tor, "DON'T use incomplete dir");
     }
 
     tr_bandwidthConstruct(&tor->bandwidth, session, &session->bandwidth);
