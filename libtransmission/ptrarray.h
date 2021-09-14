@@ -28,16 +28,11 @@ typedef struct tr_ptrArray
     void** items;
     int n_items;
     int n_alloc;
-}
-tr_ptrArray;
+} tr_ptrArray;
 
 typedef tr_voidptr_compare_func PtrArrayCompareFunc;
 
-typedef void (* PtrArrayForeachFunc)(void*);
-
-#define TR_PTR_ARRAY_INIT_STATIC { NULL, 0, 0 }
-
-extern tr_ptrArray const TR_PTR_ARRAY_INIT;
+typedef void (*PtrArrayForeachFunc)(void*);
 
 /** @brief Destructor to free a tr_ptrArray's internal memory */
 void tr_ptrArrayDestruct(tr_ptrArray*, PtrArrayForeachFunc func);
