@@ -17,8 +17,6 @@
 
 #include "tr-macros.h"
 
-TR_BEGIN_DECLS
-
 struct tr_error;
 
 /**
@@ -50,7 +48,7 @@ typedef struct tr_sys_dir_win32* tr_sys_dir_t;
 #endif
 
 /** @brief Platform-specific invalid directory descriptor constant. */
-#define TR_BAD_SYS_DIR ((tr_sys_dir_t)NULL)
+#define TR_BAD_SYS_DIR ((tr_sys_dir_t) nullptr)
 
 typedef enum
 {
@@ -687,5 +685,3 @@ bool tr_sys_dir_close(tr_sys_dir_t handle, struct tr_error** error);
 
 /** @} */
 /** @} */
-
-TR_END_DECLS

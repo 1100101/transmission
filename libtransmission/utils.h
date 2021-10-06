@@ -11,11 +11,11 @@
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stddef.h> /* size_t */
+#include <string_view>
 #include <time.h> /* time_t */
+#include <vector>
 
 #include "tr-macros.h"
-
-TR_BEGIN_DECLS
 
 /***
 ****
@@ -60,7 +60,7 @@ char const* tr_strip_positional_args(char const* fmt);
 
 #define TR_N_ELEMENTS(ary) (sizeof(ary) / sizeof(*(ary)))
 
-char const* tr_get_mime_type_for_filename(char const* filename);
+char const* tr_get_mime_type_for_filename(std::string_view filename);
 
 /**
  * @brief Rich Salz's classic implementation of shell-style pattern matching for ?, \, [], and * characters.
@@ -218,9 +218,6 @@ int tr_lowerBound(
     tr_voidptr_compare_func compar,
     bool* exact_match) TR_GNUC_HOT TR_GNUC_NONNULL(1, 5, 6);
 
-/** @brief moves the best k items to the first slots in the array. O(n) */
-void tr_quickfindFirstK(void* base, size_t nmemb, size_t size, tr_voidptr_compare_func compar, size_t k);
-
 /**
  * @brief sprintf() a string into a newly-allocated buffer large enough to hold it
  * @return a newly-allocated string that can be freed with tr_free()
@@ -254,14 +251,9 @@ char const* tr_strcasestr(char const* haystack, char const* needle);
 /** @brief Portability wrapper for strsep() that uses the system implementation if available */
 char* tr_strsep(char** str, char const* delim);
 
-/** @brief Concatenates array of strings with delimiter in between elements */
-char* tr_strjoin(char const* const* arr, size_t len, char const* delim);
-
 /***
 ****
 ***/
-
-int compareInt(void const* va, void const* vb);
 
 void tr_binary_to_hex(void const* input, void* output, size_t byte_length) TR_GNUC_NONNULL(1, 2);
 void tr_hex_to_binary(void const* input, void* output, size_t byte_length) TR_GNUC_NONNULL(1, 2);
@@ -292,7 +284,7 @@ double tr_getRatio(uint64_t numerator, uint64_t denominator);
  *
  * For example, "5-8" will return [ 5, 6, 7, 8 ] and setmeCount will be 4.
  */
-int* tr_parseNumberRange(char const* str, size_t str_len, int* setmeCount) TR_GNUC_MALLOC TR_GNUC_NONNULL(1);
+std::vector<int> tr_parseNumberRange(char const* str, size_t str_len) TR_GNUC_NONNULL(1);
 
 /**
  * @brief truncate a double value at a given number of decimal places.
@@ -424,7 +416,3 @@ char* tr_env_get_string(char const* key, char const* default_value);
 ***/
 
 void tr_net_init(void);
-
-/** @} */
-
-TR_END_DECLS

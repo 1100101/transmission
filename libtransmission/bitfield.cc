@@ -6,7 +6,8 @@
  *
  */
 
-#include <string.h> /* memset */
+#include <algorithm>
+#include <cstring> /* memset */
 
 #include "transmission.h"
 #include "bitfield.h"
@@ -66,7 +67,7 @@ static size_t countRange(tr_bitfield const* b, size_t begin, size_t end)
     }
 
     TR_ASSERT(begin < end);
-    TR_ASSERT(b->bits != NULL);
+    TR_ASSERT(b->bits != nullptr);
 
     if (first_byte == last_byte)
     {
@@ -85,7 +86,7 @@ static size_t countRange(tr_bitfield const* b, size_t begin, size_t end)
     else
     {
         uint8_t val;
-        size_t const walk_end = MIN(b->alloc_count, last_byte);
+        size_t const walk_end = std::min(b->alloc_count, last_byte);
 
         /* first byte */
         size_t const first_shift = begin - (first_byte * 8);
@@ -158,9 +159,9 @@ bool tr_bitfieldHas(tr_bitfield const* b, size_t n)
 
 static bool tr_bitfieldIsValid(tr_bitfield const* b)
 {
-    TR_ASSERT(b != NULL);
-    TR_ASSERT((b->alloc_count == 0) == (b->bits == NULL));
-    TR_ASSERT(b->bits == NULL || b->true_count == countArray(b));
+    TR_ASSERT(b != nullptr);
+    TR_ASSERT((b->alloc_count == 0) == (b->bits == nullptr));
+    TR_ASSERT(b->bits == nullptr || b->true_count == countArray(b));
 
     return true;
 }
@@ -220,7 +221,7 @@ static void tr_bitfieldEnsureBitsAlloced(tr_bitfield* b, size_t n)
 
     if (has_all)
     {
-        bytes_needed = get_bytes_needed(MAX(n, b->true_count));
+        bytes_needed = get_bytes_needed(std::max(n, b->true_count));
     }
     else
     {
@@ -255,7 +256,7 @@ static bool tr_bitfieldEnsureNthBitAlloced(tr_bitfield* b, size_t nth)
 static void tr_bitfieldFreeArray(tr_bitfield* b)
 {
     tr_free(b->bits);
-    b->bits = NULL;
+    b->bits = nullptr;
     b->alloc_count = 0;
 }
 
@@ -302,7 +303,7 @@ void tr_bitfieldConstruct(tr_bitfield* b, size_t bit_count)
 {
     b->bit_count = bit_count;
     b->true_count = 0;
-    b->bits = NULL;
+    b->bits = nullptr;
     b->alloc_count = 0;
     b->have_all_hint = false;
     b->have_none_hint = false;
@@ -353,7 +354,7 @@ void tr_bitfieldSetRaw(tr_bitfield* b, void const* bits, size_t byte_count, bool
 
     if (bounded)
     {
-        byte_count = MIN(byte_count, get_bytes_needed(b->bit_count));
+        byte_count = std::min(byte_count, get_bytes_needed(b->bit_count));
     }
 
     b->bits = static_cast<uint8_t*>(tr_memdup(bits, byte_count));
@@ -385,7 +386,7 @@ void tr_bitfieldSetFromFlags(tr_bitfield* b, bool const* flags, size_t n)
 
     for (size_t i = 0; i < n; ++i)
     {
-        if (flags[i])
+        if (flags[i] && b->bits != nullptr)
         {
             ++trueCount;
             b->bits[i >> 3U] |= (0x80 >> (i & 7U));
@@ -401,7 +402,7 @@ void tr_bitfieldAdd(tr_bitfield* b, size_t nth)
     {
         size_t const offset = nth >> 3U;
 
-        if ((b->bits != NULL) && (offset < b->alloc_count))
+        if ((b->bits != nullptr) && (offset < b->alloc_count))
         {
             b->bits[offset] |= 0x80 >> (nth & 7U);
             tr_bitfieldIncTrueCount(b, 1);

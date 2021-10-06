@@ -27,8 +27,6 @@
 
 #include "tr-macros.h"
 
-TR_BEGIN_DECLS
-
 typedef uint32_t tr_file_index_t;
 typedef uint32_t tr_piece_index_t;
 /* assuming a 16 KiB block, a 32-bit block index gives us a maximum torrent size of 63 TiB.
@@ -1705,7 +1703,7 @@ typedef struct tr_stat
 
     /** A warning or error message regarding the torrent.
         @see error */
-    char errorString[512];
+    char const* errorString;
 
     /** When tr_stat.activity is TR_STATUS_CHECK or TR_STATUS_CHECK_WAIT,
         this is the percentage of how much of the files has been
@@ -1891,5 +1889,3 @@ static inline bool tr_isDirection(tr_direction d)
 {
     return d == TR_UP || d == TR_DOWN;
 }
-
-TR_END_DECLS
