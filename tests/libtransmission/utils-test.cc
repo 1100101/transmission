@@ -6,6 +6,8 @@
  *
  */
 
+#include <string_view>
+
 #ifdef _WIN32
 #include <windows.h>
 #define setenv(key, value, unused) SetEnvironmentVariableA(key, value)
@@ -30,8 +32,8 @@
 #include <string>
 
 using ::libtransmission::test::makeString;
-
 using UtilsTest = ::testing::Test;
+using namespace std::literals;
 
 TEST_F(UtilsTest, trStripPositionalArgs)
 {
@@ -79,35 +81,35 @@ TEST_F(UtilsTest, trBuildpath)
 
 TEST_F(UtilsTest, trUtf8clean)
 {
-    auto const* in = "hello world";
-    auto out = makeString(tr_utf8clean(in, TR_BAD_SIZE));
+    auto in = "hello world"sv;
+    auto out = makeString(tr_utf8clean(in));
     EXPECT_EQ(in, out);
 
-    in = "hello world";
-    out = makeString(tr_utf8clean(in, 5));
-    EXPECT_EQ("hello", out);
+    in = "hello world"sv;
+    out = makeString(tr_utf8clean(in.substr(0, 5)));
+    EXPECT_EQ("hello"sv, out);
 
     // this version is not utf-8 (but cp866)
-    in = "\x92\xE0\xE3\xA4\xAD\xAE \xA1\xEB\xE2\xEC \x81\xAE\xA3\xAE\xAC";
-    out = makeString(tr_utf8clean(in, 17));
-    EXPECT_TRUE(out.size() == 17 || out.size() == 33);
+    in = "\x92\xE0\xE3\xA4\xAD\xAE \xA1\xEB\xE2\xEC \x81\xAE\xA3\xAE\xAC"sv;
+    out = makeString(tr_utf8clean(in));
+    EXPECT_TRUE(std::size(out) == 17 || std::size(out) == 33);
     EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
 
     // same string, but utf-8 clean
-    in = "Трудно быть Богом";
-    out = makeString(tr_utf8clean(in, TR_BAD_SIZE));
+    in = "Трудно быть Богом"sv;
+    out = makeString(tr_utf8clean(in));
     EXPECT_NE(nullptr, out.data());
     EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
     EXPECT_EQ(in, out);
 
-    in = "\xF4\x00\x81\x82";
-    out = makeString(tr_utf8clean(in, 4));
+    in = "\xF4\x00\x81\x82"sv;
+    out = makeString(tr_utf8clean(in));
     EXPECT_NE(nullptr, out.data());
     EXPECT_TRUE(out.size() == 1 || out.size() == 2);
     EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
 
-    in = "\xF4\x33\x81\x82";
-    out = makeString(tr_utf8clean(in, 4));
+    in = "\xF4\x33\x81\x82"sv;
+    out = makeString(tr_utf8clean(in));
     EXPECT_NE(nullptr, out.data());
     EXPECT_TRUE(out.size() == 4 || out.size() == 7);
     EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
@@ -125,20 +127,20 @@ TEST_F(UtilsTest, numbers)
         return ss.str();
     };
 
-    auto numbers = tr_parseNumberRange("1-10,13,16-19", TR_BAD_SIZE);
+    auto numbers = tr_parseNumberRange("1-10,13,16-19"sv);
     EXPECT_EQ(std::string("1 2 3 4 5 6 7 8 9 10 13 16 17 18 19 "), tostring(numbers));
 
-    numbers = tr_parseNumberRange("1-5,3-7,2-6", TR_BAD_SIZE);
+    numbers = tr_parseNumberRange("1-5,3-7,2-6"sv);
     EXPECT_EQ(std::string("1 2 3 4 5 6 7 "), tostring(numbers));
 
-    numbers = tr_parseNumberRange("1-Hello", TR_BAD_SIZE);
+    numbers = tr_parseNumberRange("1-Hello"sv);
     auto const empty_string = std::string{};
     EXPECT_EQ(empty_string, tostring(numbers));
 
-    numbers = tr_parseNumberRange("1-", TR_BAD_SIZE);
+    numbers = tr_parseNumberRange("1-"sv);
     EXPECT_EQ(empty_string, tostring(numbers));
 
-    numbers = tr_parseNumberRange("Hello", TR_BAD_SIZE);
+    numbers = tr_parseNumberRange("Hello"sv);
     EXPECT_EQ(empty_string, tostring(numbers));
 }
 
@@ -398,9 +400,9 @@ TEST_F(UtilsTest, env)
 
 TEST_F(UtilsTest, mimeTypes)
 {
-    EXPECT_STREQ("audio/x-flac", tr_get_mime_type_for_filename("music.flac"));
-    EXPECT_STREQ("audio/x-flac", tr_get_mime_type_for_filename("music.FLAC"));
-    EXPECT_STREQ("video/x-msvideo", tr_get_mime_type_for_filename(".avi"));
-    EXPECT_STREQ("video/x-msvideo", tr_get_mime_type_for_filename("/path/to/FILENAME.AVI"));
-    EXPECT_EQ(nullptr, tr_get_mime_type_for_filename("music.ajoijfeisfe"));
+    EXPECT_EQ("audio/x-flac"sv, tr_get_mime_type_for_filename("music.flac"sv));
+    EXPECT_EQ("audio/x-flac"sv, tr_get_mime_type_for_filename("music.FLAC"sv));
+    EXPECT_EQ("video/x-msvideo"sv, tr_get_mime_type_for_filename(".avi"sv));
+    EXPECT_EQ("video/x-msvideo"sv, tr_get_mime_type_for_filename("/path/to/FILENAME.AVI"sv));
+    EXPECT_EQ("application/octet-stream"sv, tr_get_mime_type_for_filename("music.ajoijfeisfe"sv));
 }

@@ -16,17 +16,17 @@
 #endif
 
 #include <algorithm> // std::sort
-#include <errno.h>
+#include <cerrno>
 #include <stack>
-#include <stdlib.h> /* strtod() */
-#include <string.h>
+#include <cstdlib> /* strtod() */
+#include <cstring>
 #include <vector>
 
 #ifdef _WIN32
 #include <share.h>
 #endif
 
-#include <locale.h> /* setlocale() */
+#include <clocale> /* setlocale() */
 
 #if defined(HAVE_USELOCALE) && defined(HAVE_XLOCALE_H)
 #include <xlocale.h>
@@ -149,29 +149,20 @@ static void tr_variant_string_clear(struct tr_variant_string* str)
 }
 
 /* returns a const pointer to the variant's string */
-static char const* tr_variant_string_get_string(struct tr_variant_string const* str)
+static constexpr char const* tr_variant_string_get_string(struct tr_variant_string const* str)
 {
-    char const* ret;
-
     switch (str->type)
     {
     case TR_STRING_TYPE_BUF:
-        ret = str->str.buf;
-        break;
+        return str->str.buf;
 
     case TR_STRING_TYPE_HEAP:
-        ret = str->str.str;
-        break;
-
     case TR_STRING_TYPE_QUARK:
-        ret = str->str.str;
-        break;
+        return str->str.str;
 
     default:
-        ret = nullptr;
+        return nullptr;
     }
-
-    return ret;
 }
 
 static void tr_variant_string_set_quark(struct tr_variant_string* str, tr_quark const quark)
@@ -182,25 +173,19 @@ static void tr_variant_string_set_quark(struct tr_variant_string* str, tr_quark 
     str->str.str = tr_quark_get_string(quark, &str->len);
 }
 
-static void tr_variant_string_set_string(struct tr_variant_string* str, char const* bytes, size_t len)
+static void tr_variant_string_set_string(struct tr_variant_string* str, std::string_view in)
 {
     tr_variant_string_clear(str);
 
-    if (bytes == nullptr)
-    {
-        len = 0;
-    }
-    else if (len == TR_BAD_SIZE)
-    {
-        len = strlen(bytes);
-    }
+    auto const* const bytes = std::data(in);
+    auto const len = std::size(in);
 
     if (len < sizeof(str->str.buf))
     {
         str->type = TR_STRING_TYPE_BUF;
         if (len > 0)
         {
-            memcpy(str->str.buf, bytes, len);
+            std::copy_n(bytes, len, str->str.buf);
         }
 
         str->str.buf[len] = '\0';
@@ -208,8 +193,8 @@ static void tr_variant_string_set_string(struct tr_variant_string* str, char con
     }
     else
     {
-        char* tmp = tr_new(char, len + 1);
-        memcpy(tmp, bytes, len);
+        auto* tmp = tr_new(char, len + 1);
+        std::copy_n(bytes, len, tmp);
         tmp[len] = '\0';
         str->type = TR_STRING_TYPE_HEAP;
         str->str.str = tmp;
@@ -221,7 +206,7 @@ static void tr_variant_string_set_string(struct tr_variant_string* str, char con
 ****
 ***/
 
-static inline char const* getStr(tr_variant const* v)
+static constexpr char const* getStr(tr_variant const* v)
 {
     TR_ASSERT(tr_variantIsString(v));
 
@@ -348,7 +333,6 @@ bool tr_variantGetRaw(tr_variant const* v, uint8_t const** setme_raw, size_t* se
 
 bool tr_variantGetBool(tr_variant const* v, bool* setme)
 {
-    char const* str;
     bool success = false;
 
     if (tr_variantIsBool(v))
@@ -363,6 +347,7 @@ bool tr_variantGetBool(tr_variant const* v, bool* setme)
         success = true;
     }
 
+    char const* str = nullptr;
     if ((!success) && tr_variantGetStr(v, &str, nullptr) && (strcmp(str, "true") == 0 || strcmp(str, "false") == 0))
     {
         *setme = strcmp(str, "true") == 0;
@@ -390,13 +375,11 @@ bool tr_variantGetReal(tr_variant const* v, double* setme)
 
     if (!success && tr_variantIsString(v))
     {
-        char* endptr;
-        struct locale_context locale_ctx;
-        double d;
-
         /* the json spec requires a '.' decimal point regardless of locale */
+        struct locale_context locale_ctx;
         use_numeric_locale(&locale_ctx, "C");
-        d = strtod(getStr(v), &endptr);
+        char* endptr = nullptr;
+        double const d = strtod(getStr(v), &endptr);
         restore_locale(&locale_ctx);
 
         if (getStr(v) != endptr && *endptr == '\0')
@@ -456,7 +439,7 @@ bool tr_variantDictFindRaw(tr_variant* dict, tr_quark const key, uint8_t const**
 void tr_variantInitRaw(tr_variant* v, void const* src, size_t byteCount)
 {
     tr_variantInit(v, TR_VARIANT_TYPE_STR);
-    tr_variant_string_set_string(&v->val.s, static_cast<char const*>(src), byteCount);
+    tr_variant_string_set_string(&v->val.s, { static_cast<char const*>(src), byteCount });
 }
 
 void tr_variantInitQuark(tr_variant* v, tr_quark const q)
@@ -465,10 +448,10 @@ void tr_variantInitQuark(tr_variant* v, tr_quark const q)
     tr_variant_string_set_quark(&v->val.s, q);
 }
 
-void tr_variantInitStr(tr_variant* v, void const* str, size_t len)
+void tr_variantInitStr(tr_variant* v, std::string_view str)
 {
     tr_variantInit(v, TR_VARIANT_TYPE_STR);
-    tr_variant_string_set_string(&v->val.s, static_cast<char const*>(str), len);
+    tr_variant_string_set_string(&v->val.s, str);
 }
 
 void tr_variantInitBool(tr_variant* v, bool value)
@@ -495,7 +478,7 @@ void tr_variantInitList(tr_variant* v, size_t reserve_count)
     tr_variantListReserve(v, reserve_count);
 }
 
-static void containerReserve(tr_variant* v, size_t count)
+static tr_variant* containerReserve(tr_variant* v, size_t count)
 {
     TR_ASSERT(tr_variantIsContainer(v));
 
@@ -514,6 +497,8 @@ static void containerReserve(tr_variant* v, size_t count)
         v->val.l.vals = tr_renew(tr_variant, v->val.l.vals, n);
         v->val.l.alloc = n;
     }
+
+    return v->val.l.vals + v->val.l.count;
 }
 
 void tr_variantListReserve(tr_variant* list, size_t count)
@@ -540,9 +525,8 @@ tr_variant* tr_variantListAdd(tr_variant* list)
 {
     TR_ASSERT(tr_variantIsList(list));
 
-    containerReserve(list, 1);
-
-    tr_variant* child = &list->val.l.vals[list->val.l.count++];
+    tr_variant* child = containerReserve(list, 1);
+    ++list->val.l.count;
     child->key = 0;
     tr_variantInit(child, TR_VARIANT_TYPE_INT);
 
@@ -570,10 +554,10 @@ tr_variant* tr_variantListAddBool(tr_variant* list, bool val)
     return child;
 }
 
-tr_variant* tr_variantListAddStr(tr_variant* list, char const* val)
+tr_variant* tr_variantListAddStr(tr_variant* list, std::string_view str)
 {
     tr_variant* child = tr_variantListAdd(list);
-    tr_variantInitStr(child, val, TR_BAD_SIZE);
+    tr_variantInitStr(child, str);
     return child;
 }
 
@@ -609,21 +593,19 @@ tr_variant* tr_variantDictAdd(tr_variant* dict, tr_quark const key)
 {
     TR_ASSERT(tr_variantIsDict(dict));
 
-    containerReserve(dict, 1);
-
-    tr_variant* val = dict->val.l.vals + dict->val.l.count++;
-    tr_variantInit(val, TR_VARIANT_TYPE_INT);
+    tr_variant* val = containerReserve(dict, 1);
+    ++dict->val.l.count;
     val->key = key;
+    tr_variantInit(val, TR_VARIANT_TYPE_INT);
 
     return val;
 }
 
 static tr_variant* dictFindOrAdd(tr_variant* dict, tr_quark const key, int type)
 {
-    tr_variant* child;
-
     /* see if it already exists, and if so, try to reuse it */
-    if ((child = tr_variantDictFind(dict, key)) != nullptr)
+    tr_variant* child = tr_variantDictFind(dict, key);
+    if (child != nullptr)
     {
         if (!tr_variantIsType(child, type))
         {
@@ -673,10 +655,10 @@ tr_variant* tr_variantDictAddQuark(tr_variant* dict, tr_quark const key, tr_quar
     return child;
 }
 
-tr_variant* tr_variantDictAddStr(tr_variant* dict, tr_quark const key, char const* val)
+tr_variant* tr_variantDictAddStr(tr_variant* dict, tr_quark const key, std::string_view str)
 {
     tr_variant* child = dictFindOrAdd(dict, key, TR_VARIANT_TYPE_STR);
-    tr_variantInitStr(child, val, TR_BAD_SIZE);
+    tr_variantInitStr(child, str);
     return child;
 }
 
@@ -821,7 +803,7 @@ void tr_variantWalk(tr_variant const* v_in, struct VariantWalkFuncs const* walkF
     while (!stack.empty())
     {
         auto& node = stack.top();
-        tr_variant const* v;
+        tr_variant const* v = nullptr;
 
         if (!node.is_visited)
         {
@@ -903,23 +885,17 @@ void tr_variantWalk(tr_variant const* v_in, struct VariantWalkFuncs const* walkF
 *****
 ****/
 
-static void freeDummyFunc(tr_variant const* v, void* buf)
+static void freeDummyFunc(tr_variant const* /*v*/, void* /*buf*/)
 {
-    TR_UNUSED(v);
-    TR_UNUSED(buf);
 }
 
-static void freeStringFunc(tr_variant const* v, void* user_data)
+static void freeStringFunc(tr_variant const* v, void* /*user_data*/)
 {
-    TR_UNUSED(user_data);
-
     tr_variant_string_clear(&((tr_variant*)v)->val.s);
 }
 
-static void freeContainerEndFunc(tr_variant const* v, void* user_data)
+static void freeContainerEndFunc(tr_variant const* v, void* /*user_data*/)
 {
-    TR_UNUSED(user_data);
-
     tr_free(v->val.l.vals);
 }
 
@@ -948,7 +924,7 @@ void tr_variantFree(tr_variant* v)
 static void tr_variantListCopy(tr_variant* target, tr_variant const* src)
 {
     int i = 0;
-    tr_variant const* val;
+    tr_variant const* val = nullptr;
 
     while ((val = tr_variantListChild((tr_variant*)src, i)) != nullptr)
     {
@@ -1026,12 +1002,12 @@ void tr_variantMergeDicts(tr_variant* target, tr_variant const* source)
 
     for (size_t i = 0; i < sourceCount; ++i)
     {
-        tr_quark key;
-        tr_variant* val;
-        tr_variant* t;
-
+        auto key = tr_quark{};
+        tr_variant* val = nullptr;
         if (tr_variantDictChild((tr_variant*)source, i, &key, &val))
         {
+            tr_variant* t = nullptr;
+
             // if types differ, ensure that target will overwrite source
             tr_variant* const target_child = tr_variantDictFind(target, key);
             if (target_child && !tr_variantIsType(target_child, val->type))
@@ -1227,11 +1203,9 @@ int tr_variantToFile(tr_variant const* v, tr_variant_fmt fmt, char const* filena
 bool tr_variantFromFile(tr_variant* setme, tr_variant_fmt fmt, char const* filename, tr_error** error)
 {
     bool ret = false;
-    uint8_t* buf;
-    size_t buflen;
 
-    buf = tr_loadFile(filename, &buflen, error);
-
+    auto buflen = size_t{};
+    uint8_t* const buf = tr_loadFile(filename, &buflen, error);
     if (buf != nullptr)
     {
         if (tr_variantFromBuf(setme, fmt, buf, buflen, filename, nullptr) == 0)
@@ -1257,12 +1231,11 @@ int tr_variantFromBuf(
     char const* optional_source,
     char const** setme_end)
 {
-    int err;
-    struct locale_context locale_ctx;
-
     /* parse with LC_NUMERIC="C" to ensure a "." decimal separator */
+    struct locale_context locale_ctx;
     use_numeric_locale(&locale_ctx, "C");
 
+    auto err = int{};
     switch (fmt)
     {
     case TR_VARIANT_FMT_JSON:

@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "transmission.h"
 #include "tr-macros.h"
 #include "variant.h"
@@ -16,7 +18,7 @@
 ****  RPC processing
 ***/
 
-typedef void (*tr_rpc_response_func)(tr_session* session, tr_variant* response, void* user_data);
+using tr_rpc_response_func = void (*)(tr_session* session, tr_variant* response, void* user_data);
 
 /* http://www.json.org/ */
 void tr_rpc_request_exec_json(
@@ -33,4 +35,4 @@ void tr_rpc_request_exec_uri(
     tr_rpc_response_func callback,
     void* callback_user_data);
 
-void tr_rpc_parse_list_str(tr_variant* setme, char const* list_str, size_t list_str_len);
+void tr_rpc_parse_list_str(tr_variant* setme, std::string_view str);

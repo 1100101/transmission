@@ -6,8 +6,8 @@
  *
  */
 
-#include <string.h> /* strchr() */
-#include <stdio.h> /* sscanf() */
+#include <cstring> /* strchr() */
+#include <cstdio> /* sscanf() */
 
 #include "transmission.h"
 #include "crypto-utils.h" /* tr_hex_to_sha1() */
@@ -24,7 +24,7 @@
 /* this base32 code converted from code by Robert Kaye and Gordon Mohr
  * and is public domain. see http://bitzi.com/publicdomain for more info */
 
-static int const base32Lookup[] = {
+static int constexpr base32Lookup[] = {
     0xFF, 0xFF, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, /* '0', '1', '2', '3', '4', '5', '6', '7' */
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, /* '8', '9', ':', ';', '<', '=', '>', '?' */
     0xFF, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, /* '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G' */
@@ -49,7 +49,6 @@ static void base32_to_sha1(uint8_t* out, char const* in, size_t const inlen)
     size_t offset = 0;
     for (size_t i = 0; i < inlen; ++i)
     {
-        int digit;
         int lookup = in[i] - '0';
 
         /* Skip chars outside the lookup table */
@@ -59,7 +58,7 @@ static void base32_to_sha1(uint8_t* out, char const* in, size_t const inlen)
         }
 
         /* If this digit is not in the table, ignore it */
-        digit = base32Lookup[lookup];
+        int const digit = base32Lookup[lookup];
 
         if (digit == 0xFF)
         {
@@ -127,9 +126,8 @@ tr_magnet_info* tr_magnetParse(char const* uri)
             char const* delim = strchr(key, '=');
             char const* val = delim == nullptr ? nullptr : delim + 1;
             char const* next = strchr(delim == nullptr ? key : val, '&');
-            size_t keylen;
-            size_t vallen;
 
+            auto keylen = size_t{};
             if (delim != nullptr)
             {
                 keylen = (size_t)(delim - key);
@@ -143,6 +141,7 @@ tr_magnet_info* tr_magnetParse(char const* uri)
                 keylen = strlen(key);
             }
 
+            auto vallen = size_t{};
             if (val == nullptr)
             {
                 vallen = 0;
@@ -180,7 +179,7 @@ tr_magnet_info* tr_magnetParse(char const* uri)
 
             if (vallen > 0 && trCount < MAX_TRACKERS)
             {
-                int i;
+                auto i = int{};
 
                 if (keylen == 2 && memcmp(key, "tr", 2) == 0)
                 {
@@ -254,7 +253,6 @@ void tr_magnetFree(tr_magnet_info* info)
 
 void tr_magnetCreateMetainfo(tr_magnet_info const* info, tr_variant* top)
 {
-    tr_variant* d;
     tr_variantInitDict(top, 4);
 
     /* announce list */
@@ -284,7 +282,7 @@ void tr_magnetCreateMetainfo(tr_magnet_info const* info, tr_variant* top)
     }
 
     /* nonstandard keys */
-    d = tr_variantDictAddDict(top, TR_KEY_magnet_info, 2);
+    auto* const d = tr_variantDictAddDict(top, TR_KEY_magnet_info, 2);
     tr_variantDictAddRaw(d, TR_KEY_info_hash, info->hash, 20);
 
     if (info->displayName != nullptr)

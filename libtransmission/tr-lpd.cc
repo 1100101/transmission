@@ -30,7 +30,7 @@ THE SOFTWARE.
 #ifdef _WIN32
 #include <inttypes.h>
 #include <ws2tcpip.h>
-typedef uint16_t in_port_t; /* all missing */
+using in_port_t = uint16_t; /* all missing */
 #else
 #include <ctime>
 #include <unistd.h> /* close() */
@@ -68,28 +68,21 @@ typedef uint16_t in_port_t; /* all missing */
 
 static void event_callback(evutil_socket_t, short, void*);
 
-enum
-{
-    UPKEEP_INTERVAL_SECS = 5
-};
+static auto constexpr UpkeepIntervalSecs = int{ 5 };
 
 static struct event* upkeep_timer = nullptr;
 
 static tr_socket_t lpd_socket; /**<separate multicast receive socket */
 static tr_socket_t lpd_socket2; /**<and multicast send socket */
-static struct event* lpd_event = nullptr;
+static event* lpd_event = nullptr;
 static tr_port lpd_port;
 
 static tr_session* session;
 
-enum
-{
-    lpd_maxDatagramLength = 200 /**<the size an LPD datagram must not exceed */
-};
-
-char const lpd_mcastGroup[] = "239.192.152.143"; /**<LPD multicast group */
-int const lpd_mcastPort = 6771; /**<LPD source and destination UPD port */
-static struct sockaddr_in lpd_mcastAddr; /**<initialized from the above constants in tr_lpdInit */
+static auto constexpr lpd_maxDatagramLength = int{ 200 }; /**<the size an LPD datagram must not exceed */
+static char constexpr lpd_mcastGroup[] = "239.192.152.143"; /**<LPD multicast group */
+static auto constexpr lpd_mcastPort = int{ 6771 }; /**<LPD source and destination UPD port */
+static auto lpd_mcastAddr = sockaddr_in{}; /**<initialized from the above constants in tr_lpdInit */
 
 /**
 * @brief Protocol-related information carried by a Local Peer Discovery packet */
@@ -99,20 +92,14 @@ struct lpd_protocolVersion
     int minor;
 };
 
-enum lpd_enumTimeToLive
-{
-    lpd_ttlSameSubnet = 1,
-    lpd_ttlSameSite = 32,
-    lpd_ttlSameRegion = 64,
-    lpd_ttlSameContinent = 128,
-    lpd_ttlUnrestricted = 255
-};
+static auto constexpr lpd_ttlSameSubnet = int{ 1 };
+// static auto constexpr lpd_ttlSameSite = int{ 32 };
+// static auto constexpr lpd_ttlSameRegion = int{ 64 };
+// static auto constexpr lpd_ttlSameContinent = int{ 128 };
+// static auto constexpr lpd_ttlUnrestricted = int{ 255 };
 
-enum
-{
-    lpd_announceInterval = 4 * 60, /**<4 min announce interval per torrent */
-    lpd_announceScope = lpd_ttlSameSubnet /**<the maximum scope for LPD datagrams */
-};
+static auto constexpr lpd_announceInterval = int{ 4 * 60 }; /**<4 min announce interval per torrent */
+static auto constexpr lpd_announceScope = int{ lpd_ttlSameSubnet }; /**<the maximum scope for LPD datagrams */
 
 /**
 * @defgroup DoS Message Flood Protection
@@ -132,10 +119,7 @@ enum
 * @ingroup DoS
 * @brief allow at most ten messages per second (interval average)
 * @note this constraint is only enforced once per housekeeping interval */
-enum
-{
-    lpd_announceCapFactor = 10
-};
+static auto constexpr lpd_announceCapFactor = int{ 10 };
 
 /**
 * @ingroup DoS
@@ -156,17 +140,17 @@ static int lpd_unsolicitedMsgCounter;
 /**
 * @brief Checks for BT-SEARCH method and separates the parameter section
 * @param[in] s The request string
-* @param[out] ver If non-NULL, gets filled with protocol info from the request
+* @param[out] ver If non-nullptr, gets filled with protocol info from the request
 * @return Returns a relative pointer to the beginning of the parameter section.
-*         If result is NULL, s was invalid and no information will be returned
+*         If result is nullptr, s was invalid and no information will be returned
 * @remark Note that the returned pointer is only usable as long as the given
 *         pointer s is valid; that is, return storage is temporary.
 *
 * Determines whether the given string checks out to be a valid BT-SEARCH message.
 * If so, the return value points to the beginning of the parameter section (note:
 * in this case the function returns a character sequence beginning with CRLF).
-* If parameter is not NULL, the declared protocol version is returned as part of
-* the lpd_protocolVersion structure.
+* If parameter is not nullptr, the declared protocol version is returned as part
+* of the lpd_protocolVersion structure.
 */
 static char const* lpd_extractHeader(char const* s, struct lpd_protocolVersion* const ver)
 {
@@ -228,31 +212,27 @@ static char const* lpd_extractHeader(char const* s, struct lpd_protocolVersion* 
 *   - assemble search string "\r\nName: " and locate position
 *   - copy back value from end to next "\r\n"
 */
+// TODO: string_view
 static bool lpd_extractParam(char const* const str, char const* const name, int n, char* const val)
 {
     TR_ASSERT(str != nullptr);
     TR_ASSERT(name != nullptr);
     TR_ASSERT(val != nullptr);
 
-    enum
-    {
-        /* configure maximum length of search string here */
-        maxLength = 30
-    };
+    /* configure maximum length of search string here */
+    auto constexpr MaxLength = int{ 30 };
 
-    char sstr[maxLength] = { 0 };
-    char const* pos;
+    char sstr[MaxLength] = { 0 };
 
-    if (strlen(name) > maxLength - strlen(CRLF ": "))
+    if (strlen(name) > MaxLength - strlen(CRLF ": "))
     {
         return false;
     }
 
     /* compose the string token to search for */
-    tr_snprintf(sstr, maxLength, CRLF "%s: ", name);
+    tr_snprintf(sstr, MaxLength, CRLF "%s: ", name);
 
-    pos = strstr(str, sstr);
-
+    char const* const pos = strstr(str, sstr);
     if (pos == nullptr)
     {
         return false; /* search was not successful */
@@ -290,15 +270,13 @@ static void on_upkeep_timer(evutil_socket_t, short, void*);
 * @remark Since the LPD service does not use another protocol family yet, this code is
 * IPv4 only for the time being.
 */
-int tr_lpdInit(tr_session* ss, tr_address* tr_addr)
+int tr_lpdInit(tr_session* ss, tr_address* /*tr_addr*/)
 {
-    TR_UNUSED(tr_addr);
-
     /* if this check fails (i.e. the definition of hashString changed), update
      * string handling in tr_lpdSendAnnounce() and tr_lpdConsiderAnnounce().
      * However, the code should work as long as interfaces to the rest of
      * libtransmission are compatible with char* strings. */
-    TR_STATIC_ASSERT(sizeof(((struct tr_info*)0)->hashString[0]) == sizeof(char), "");
+    static_assert(sizeof(((struct tr_info*)nullptr)->hashString[0]) == sizeof(char), "");
 
     struct ip_mreq mcastReq;
     int const opt_on = 1;
@@ -410,7 +388,7 @@ int tr_lpdInit(tr_session* ss, tr_address* tr_addr)
     event_add(lpd_event, nullptr);
 
     upkeep_timer = evtimer_new(ss->event_base, on_upkeep_timer, ss);
-    tr_timerAdd(upkeep_timer, UPKEEP_INTERVAL_SECS, 0);
+    tr_timerAdd(upkeep_timer, UpkeepIntervalSecs, 0);
 
     tr_logAddNamedDbg("LPD", "Local Peer Discovery initialised");
 
@@ -538,15 +516,12 @@ bool tr_lpdSendAnnounce(tr_torrent const* t)
 */
 static int tr_lpdConsiderAnnounce(tr_pex* peer, char const* const msg)
 {
-    enum
-    {
-        maxValueLen = 25,
-        maxHashLen = SIZEOF_HASH_STRING
-    };
+    auto constexpr MaxValueLen = int{ 25 };
+    auto constexpr MaxHashLen = int{ SIZEOF_HASH_STRING };
 
     auto ver = lpd_protocolVersion{ -1, -1 };
-    char value[maxValueLen] = { 0 };
-    char hashString[maxHashLen] = { 0 };
+    char value[MaxValueLen] = { 0 };
+    char hashString[MaxHashLen] = { 0 };
     int res = 0;
     int peerPort = 0;
 
@@ -563,7 +538,7 @@ static int tr_lpdConsiderAnnounce(tr_pex* peer, char const* const msg)
 
         /* save the effort to check Host, which seems to be optional anyway */
 
-        if (!lpd_extractParam(params, "Port", maxValueLen, value))
+        if (!lpd_extractParam(params, "Port", MaxValueLen, value))
         {
             return 0;
         }
@@ -577,7 +552,7 @@ static int tr_lpdConsiderAnnounce(tr_pex* peer, char const* const msg)
         peer->port = htons(peerPort);
         res = -1; /* signal caller side-effect to peer->port via return != 0 */
 
-        if (!lpd_extractParam(params, "Infohash", maxHashLen, hashString))
+        if (!lpd_extractParam(params, "Infohash", MaxHashLen, hashString))
         {
             return res;
         }
@@ -594,10 +569,8 @@ static int tr_lpdConsiderAnnounce(tr_pex* peer, char const* const msg)
 
             return 1;
         }
-        else
-        {
-            tr_logAddNamedDbg("LPD", "Cannot serve torrent #%s", hashString);
-        }
+
+        tr_logAddNamedDbg("LPD", "Cannot serve torrent #%s", hashString);
     }
 
     return res;
@@ -647,7 +620,7 @@ static int tr_lpdAnnounceMore(time_t const now, int const interval)
                 announcePrio = 2;
                 break;
 
-            default: /* fall through */
+            default:
                 break;
             }
 
@@ -684,26 +657,19 @@ static int tr_lpdAnnounceMore(time_t const now, int const interval)
     return announcesSent;
 }
 
-static void on_upkeep_timer(evutil_socket_t s, short type, void* user_data)
+static void on_upkeep_timer(evutil_socket_t /*s*/, short /*type*/, void* /*user_data*/)
 {
-    TR_UNUSED(s);
-    TR_UNUSED(type);
-    TR_UNUSED(user_data);
-
     time_t const now = tr_time();
-    tr_lpdAnnounceMore(now, UPKEEP_INTERVAL_SECS);
-    tr_timerAdd(upkeep_timer, UPKEEP_INTERVAL_SECS, 0);
+    tr_lpdAnnounceMore(now, UpkeepIntervalSecs);
+    tr_timerAdd(upkeep_timer, UpkeepIntervalSecs, 0);
 }
 
 /**
 * @brief Processing of timeout notifications and incoming data on the socket
 * @note maximum rate of read events is limited according to @a lpd_maxAnnounceCap
 * @see DoS */
-static void event_callback(evutil_socket_t s, short type, void* user_data)
+static void event_callback(evutil_socket_t /*s*/, short type, void* /*user_data*/)
 {
-    TR_UNUSED(s);
-    TR_UNUSED(user_data);
-
     TR_ASSERT(tr_isSession(session));
 
     /* do not allow announces to be processed if LPD is disabled */

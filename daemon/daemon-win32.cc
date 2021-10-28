@@ -29,15 +29,15 @@
 #define SERVICE_CONTROL_PRESHUTDOWN 0x0000000F
 #endif
 
-static dtr_callbacks const* callbacks = NULL;
-static void* callback_arg = NULL;
+static dtr_callbacks const* callbacks = nullptr;
+static void* callback_arg = nullptr;
 
 static LPCWSTR const service_name = L"TransmissionDaemon";
 
-static SERVICE_STATUS_HANDLE status_handle = NULL;
+static SERVICE_STATUS_HANDLE status_handle = nullptr;
 static DWORD current_state = SERVICE_STOPPED;
-static HANDLE service_thread = NULL;
-static HANDLE service_stop_thread = NULL;
+static HANDLE service_thread = nullptr;
+static HANDLE service_stop_thread = nullptr;
 
 /***
 ****
@@ -72,10 +72,8 @@ static void do_log_system_error(char const* file, int line, tr_log_level level, 
 ****
 ***/
 
-static BOOL WINAPI handle_console_ctrl(DWORD control_type)
+static BOOL WINAPI handle_console_ctrl(DWORD /*control_type*/)
 {
-    TR_UNUSED(control_type);
-
     callbacks->on_stop(callback_arg);
     return TRUE;
 }
@@ -128,7 +126,7 @@ static unsigned int __stdcall service_stop_thread_main(void* param)
 
 static void stop_service(void)
 {
-    if (service_stop_thread != NULL)
+    if (service_stop_thread != nullptr)
     {
         return;
     }
@@ -137,21 +135,18 @@ static void stop_service(void)
 
     update_service_status(SERVICE_STOP_PENDING, NO_ERROR, 0, 1, wait_time);
 
-    service_stop_thread = (HANDLE)_beginthreadex(NULL, 0, &service_stop_thread_main, (LPVOID)(UINT_PTR)wait_time, 0, NULL);
+    service_stop_thread = (HANDLE)
+        _beginthreadex(nullptr, 0, &service_stop_thread_main, (LPVOID)(UINT_PTR)wait_time, 0, nullptr);
 
-    if (service_stop_thread == NULL)
+    if (service_stop_thread == nullptr)
     {
         log_system_error(TR_LOG_DEBUG, GetLastError(), "_beginthreadex() failed, trying to stop synchronously");
         service_stop_thread_main((LPVOID)(UINT_PTR)wait_time);
     }
 }
 
-static DWORD WINAPI handle_service_ctrl(DWORD control_code, DWORD event_type, LPVOID event_data, LPVOID context)
+static DWORD WINAPI handle_service_ctrl(DWORD control_code, DWORD /*event_type*/, LPVOID /*event_data*/, LPVOID /*context*/)
 {
-    TR_UNUSED(event_type);
-    TR_UNUSED(event_data);
-    TR_UNUSED(context);
-
     switch (control_code)
     {
     case SERVICE_CONTROL_PRESHUTDOWN:
@@ -172,21 +167,16 @@ static DWORD WINAPI handle_service_ctrl(DWORD control_code, DWORD event_type, LP
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-static unsigned int __stdcall service_thread_main(void* context)
+static unsigned int __stdcall service_thread_main(void* /*context*/)
 {
-    TR_UNUSED(context);
-
     return callbacks->on_start(callback_arg, false);
 }
 
-static VOID WINAPI service_main(DWORD argc, LPWSTR* argv)
+static VOID WINAPI service_main(DWORD /*argc*/, LPWSTR* /*argv*/)
 {
-    TR_UNUSED(argc);
-    TR_UNUSED(argv);
+    status_handle = RegisterServiceCtrlHandlerExW(service_name, &handle_service_ctrl, nullptr);
 
-    status_handle = RegisterServiceCtrlHandlerExW(service_name, &handle_service_ctrl, NULL);
-
-    if (status_handle == NULL)
+    if (status_handle == nullptr)
     {
         log_system_error(TR_LOG_ERROR, GetLastError(), "RegisterServiceCtrlHandlerEx() failed");
         return;
@@ -194,9 +184,9 @@ static VOID WINAPI service_main(DWORD argc, LPWSTR* argv)
 
     update_service_status(SERVICE_START_PENDING, NO_ERROR, 0, 1, 1000);
 
-    service_thread = (HANDLE)_beginthreadex(NULL, 0, &service_thread_main, NULL, 0, NULL);
+    service_thread = (HANDLE)_beginthreadex(nullptr, 0, &service_thread_main, nullptr, 0, nullptr);
 
-    if (service_thread == NULL)
+    if (service_thread == nullptr)
     {
         log_system_error(TR_LOG_ERROR, GetLastError(), "_beginthreadex() failed");
         return;
@@ -209,7 +199,7 @@ static VOID WINAPI service_main(DWORD argc, LPWSTR* argv)
         log_system_error(TR_LOG_ERROR, GetLastError(), "WaitForSingleObject() failed");
     }
 
-    if (service_stop_thread != NULL)
+    if (service_stop_thread != nullptr)
     {
         WaitForSingleObject(service_stop_thread, INFINITE);
         CloseHandle(service_stop_thread);
@@ -252,7 +242,7 @@ bool dtr_daemon(dtr_callbacks const* cb, void* cb_arg, bool foreground, int* exi
     {
         SERVICE_TABLE_ENTRY const service_table[] = {
             { (LPWSTR)service_name, &service_main },
-            { NULL, NULL },
+            { nullptr, nullptr },
         };
 
         if (!StartServiceCtrlDispatcherW(service_table))

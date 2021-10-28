@@ -38,10 +38,7 @@
 #define USE_LIBCURL_SOCKOPT
 #endif
 
-enum
-{
-    THREADFUNC_MAX_SLEEP_MSEC = 200,
-};
+static auto constexpr ThreadfuncMaxSleepMsec = int{ 200 };
 
 #if 0
 #define dbgmsg(fmt, ...) fprintf(stderr, fmt "\n", __VA_ARGS__)
@@ -115,7 +112,7 @@ static size_t writeFunc(void* ptr, size_t size, size_t nmemb, void* vtask)
     {
         tr_torrent const* const tor = tr_torrentFindFromId(task->session, task->torrentId);
 
-        if (tor != nullptr && tr_bandwidthClamp(&tor->bandwidth, TR_DOWN, nmemb) == 0)
+        if (tor != nullptr && tor->bandwidth->clamp(TR_DOWN, nmemb) == 0)
         {
             task->session->web->paused_easy_handles.insert(task->curl_easy);
             return CURL_WRITEFUNC_PAUSE;
@@ -129,10 +126,8 @@ static size_t writeFunc(void* ptr, size_t size, size_t nmemb, void* vtask)
 
 #ifdef USE_LIBCURL_SOCKOPT
 
-static int sockoptfunction(void* vtask, curl_socket_t fd, curlsocktype purpose)
+static int sockoptfunction(void* vtask, curl_socket_t fd, curlsocktype /*purpose*/)
 {
-    TR_UNUSED(purpose);
-
     auto* task = static_cast<struct tr_web_task*>(vtask);
     bool const isScrape = strstr(task->url, "scrape") != nullptr;
     bool const isAnnounce = strstr(task->url, "announce") != nullptr;
@@ -154,11 +149,8 @@ static int sockoptfunction(void* vtask, curl_socket_t fd, curlsocktype purpose)
 
 #endif
 
-static CURLcode ssl_context_func(CURL* curl, void* ssl_ctx, void* user_data)
+static CURLcode ssl_context_func(CURL* /*curl*/, void* ssl_ctx, void* /*user_data*/)
 {
-    TR_UNUSED(curl);
-    TR_UNUSED(user_data);
-
     tr_x509_store_t const cert_store = tr_ssl_get_x509_store(ssl_ctx);
     if (cert_store == nullptr)
     {
@@ -216,34 +208,29 @@ static CURLcode ssl_context_func(CURL* curl, void* ssl_ctx, void* user_data)
 
 static long getTimeoutFromURL(struct tr_web_task const* task)
 {
-    long timeout;
-    tr_session const* session = task->session;
+    tr_session const* const session = task->session;
 
     if (session == nullptr || session->isClosed)
     {
-        timeout = 20L;
-    }
-    else if (strstr(task->url, "scrape") != nullptr)
-    {
-        timeout = 30L;
-    }
-    else if (strstr(task->url, "announce") != nullptr)
-    {
-        timeout = 90L;
-    }
-    else
-    {
-        timeout = 240L;
+        return 20L;
     }
 
-    return timeout;
+    if (strstr(task->url, "scrape") != nullptr)
+    {
+        return 30L;
+    }
+
+    if (strstr(task->url, "announce") != nullptr)
+    {
+        return 90L;
+    }
+
+    return 240L;
 }
 
 static CURL* createEasy(tr_session* s, struct tr_web* web, struct tr_web_task* task)
 {
-    bool is_default_value;
-    tr_address const* addr;
-    CURL* e = curl_easy_init();
+    CURL* const e = curl_easy_init();
 
     task->curl_easy = e;
     task->timeout_secs = getTimeoutFromURL(task);
@@ -284,11 +271,15 @@ static CURL* createEasy(tr_session* s, struct tr_web* web, struct tr_web_task* t
     curl_easy_setopt(e, CURLOPT_WRITEDATA, task);
     curl_easy_setopt(e, CURLOPT_WRITEFUNCTION, writeFunc);
 
-    if ((addr = tr_sessionGetPublicAddress(s, TR_AF_INET, &is_default_value)) != nullptr && !is_default_value)
+    auto is_default_value = bool{};
+    tr_address const* addr = tr_sessionGetPublicAddress(s, TR_AF_INET, &is_default_value);
+    if (addr != nullptr && !is_default_value)
     {
         curl_easy_setopt(e, CURLOPT_INTERFACE, tr_address_to_string(addr));
     }
-    else if ((addr = tr_sessionGetPublicAddress(s, TR_AF_INET6, &is_default_value)) != nullptr && !is_default_value)
+
+    addr = tr_sessionGetPublicAddress(s, TR_AF_INET6, &is_default_value);
+    if (addr != nullptr && !is_default_value)
     {
         curl_easy_setopt(e, CURLOPT_INTERFACE, tr_address_to_string(addr));
     }
@@ -415,10 +406,6 @@ struct tr_web_task* tr_webRunWebseed(
 
 static void tr_webThreadFunc(void* vsession)
 {
-    char* str;
-    CURLM* multi;
-    int taskCount = 0;
-    uint32_t repeats = 0;
     auto* session = static_cast<tr_session*>(vsession);
 
     /* try to enable ssl for https support; but if that fails,
@@ -446,26 +433,19 @@ static void tr_webThreadFunc(void* vsession)
         tr_logAddNamedInfo("web", "NB: invalid certs will show up as 'Could not connect to tracker' like many other errors");
     }
 
-    str = tr_buildPath(session->configDir, "cookies.txt", nullptr);
-
+    char* const str = tr_buildPath(session->configDir, "cookies.txt", nullptr);
     if (tr_sys_path_exists(str, nullptr))
     {
         web->cookie_filename = tr_strdup(str);
     }
-
     tr_free(str);
 
-    multi = curl_multi_init();
+    auto* const multi = curl_multi_init();
     session->web = web;
 
+    auto repeats = uint32_t{};
     for (;;)
     {
-        long msec;
-        int numfds;
-        int unused;
-        CURLMsg* msg;
-        CURLMcode mcode;
-
         if (web->close_mode == TR_WEB_CLOSE_NOW)
         {
             break;
@@ -488,7 +468,6 @@ static void tr_webThreadFunc(void* vsession)
 
             dbgmsg("adding task to curl: [%s]", task->url);
             curl_multi_add_handle(multi, createEasy(session, web, task));
-            ++taskCount;
         }
 
         tr_lockUnlock(web->taskLock);
@@ -501,12 +480,12 @@ static void tr_webThreadFunc(void* vsession)
         std::for_each(std::begin(paused), std::end(paused), [](auto* curl) { curl_easy_pause(curl, CURLPAUSE_CONT); });
 
         /* maybe wait a little while before calling curl_multi_perform() */
-        msec = 0;
+        auto msec = long{};
         curl_multi_timeout(multi, &msec);
 
         if (msec < 0)
         {
-            msec = THREADFUNC_MAX_SLEEP_MSEC;
+            msec = ThreadfuncMaxSleepMsec;
         }
 
         if (session->isClosed)
@@ -516,11 +495,12 @@ static void tr_webThreadFunc(void* vsession)
 
         if (msec > 0)
         {
-            if (msec > THREADFUNC_MAX_SLEEP_MSEC)
+            if (msec > ThreadfuncMaxSleepMsec)
             {
-                msec = THREADFUNC_MAX_SLEEP_MSEC;
+                msec = ThreadfuncMaxSleepMsec;
             }
 
+            auto numfds = int{};
             curl_multi_wait(multi, nullptr, 0, msec, &numfds);
             if (!numfds)
             {
@@ -530,7 +510,7 @@ static void tr_webThreadFunc(void* vsession)
                     /* curl_multi_wait() returns immediately if there are
                      * no fds to wait for, so we need an explicit wait here
                      * to emulate select() behavior */
-                    tr_wait_msec(std::min(msec, THREADFUNC_MAX_SLEEP_MSEC / 2L));
+                    tr_wait_msec(std::min(msec, ThreadfuncMaxSleepMsec / 2L));
                 }
             }
             else
@@ -540,24 +520,27 @@ static void tr_webThreadFunc(void* vsession)
         }
 
         /* call curl_multi_perform() */
+        auto mcode = CURLMcode{};
+        auto unused = int{};
         do
         {
             mcode = curl_multi_perform(multi, &unused);
         } while (mcode == CURLM_CALL_MULTI_PERFORM);
 
         /* pump completed tasks from the multi */
+        CURLMsg* msg = nullptr;
         while ((msg = curl_multi_info_read(multi, &unused)) != nullptr)
         {
             if (msg->msg == CURLMSG_DONE && msg->easy_handle != nullptr)
             {
-                double total_time;
-                struct tr_web_task* task;
-                long req_bytes_sent;
-                CURL* e = msg->easy_handle;
-                curl_easy_getinfo(e, CURLINFO_PRIVATE, (void*)&task);
+                CURL* const e = msg->easy_handle;
 
+                struct tr_web_task* task = nullptr;
+                curl_easy_getinfo(e, CURLINFO_PRIVATE, (void*)&task);
                 TR_ASSERT(e == task->curl_easy);
 
+                auto req_bytes_sent = long{};
+                auto total_time = double{};
                 curl_easy_getinfo(e, CURLINFO_RESPONSE_CODE, &task->code);
                 curl_easy_getinfo(e, CURLINFO_REQUEST_SIZE, &req_bytes_sent);
                 curl_easy_getinfo(e, CURLINFO_TOTAL_TIME, &total_time);
@@ -567,7 +550,6 @@ static void tr_webThreadFunc(void* vsession)
                 web->paused_easy_handles.erase(e);
                 curl_easy_cleanup(e);
                 tr_runInEventThread(task->session, task_finish_func, task);
-                --taskCount;
             }
         }
     }
@@ -761,28 +743,20 @@ char const* tr_webGetResponseStr(long code)
     }
 }
 
-void tr_http_escape(struct evbuffer* out, char const* str, size_t len, bool escape_slashes)
+void tr_http_escape(struct evbuffer* out, std::string_view str, bool escape_reserved)
 {
-    if (str == nullptr)
-    {
-        return;
-    }
+    auto constexpr ReservedChars = std::string_view{ "!*'();:@&=+$,/?%#[]" };
+    auto constexpr UnescapedChars = std::string_view{ "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_.~" };
 
-    if (len == TR_BAD_SIZE)
+    for (auto& ch : str)
     {
-        len = strlen(str);
-    }
-
-    for (char const* end = str + len; str != end; ++str)
-    {
-        if (*str == ',' || *str == '-' || *str == '.' || ('0' <= *str && *str <= '9') || ('A' <= *str && *str <= 'Z') ||
-            ('a' <= *str && *str <= 'z') || (*str == '/' && !escape_slashes))
+        if ((UnescapedChars.find(ch) != std::string_view::npos) || (ReservedChars.find(ch) && !escape_reserved))
         {
-            evbuffer_add_printf(out, "%c", *str);
+            evbuffer_add_printf(out, "%c", ch);
         }
         else
         {
-            evbuffer_add_printf(out, "%%%02X", (unsigned)(*str & 0xFF));
+            evbuffer_add_printf(out, "%%%02X", (unsigned)(ch & 0xFF));
         }
     }
 }

@@ -6,8 +6,7 @@
  *
  */
 
-#include <errno.h>
-#include <string.h> /* strcmp() */
+#include <cerrno> /* errno */
 #include <string>
 #include <unordered_set>
 
@@ -44,7 +43,7 @@
 ****
 ***/
 
-typedef struct tr_watchdir_kqueue
+struct tr_watchdir_kqueue
 {
     tr_watchdir_backend base;
 
@@ -52,7 +51,7 @@ typedef struct tr_watchdir_kqueue
     int dirfd;
     struct event* event;
     std::unordered_set<std::string> dir_entries;
-} tr_watchdir_kqueue;
+};
 
 #define BACKEND_UPCAST(b) (reinterpret_cast<tr_watchdir_kqueue*>(b))
 
@@ -62,11 +61,8 @@ typedef struct tr_watchdir_kqueue
 ****
 ***/
 
-static void tr_watchdir_kqueue_on_event(evutil_socket_t fd, short type, void* context)
+static void tr_watchdir_kqueue_on_event(evutil_socket_t /*fd*/, short /*type*/, void* context)
 {
-    TR_UNUSED(fd);
-    TR_UNUSED(type);
-
     auto const handle = static_cast<tr_watchdir_t>(context);
     tr_watchdir_kqueue* const backend = BACKEND_UPCAST(tr_watchdir_get_backend(handle));
     struct kevent ke;

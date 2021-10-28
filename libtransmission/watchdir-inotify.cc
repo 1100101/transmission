@@ -6,9 +6,9 @@
  *
  */
 
-#include <errno.h>
-#include <limits.h> /* NAME_MAX */
-#include <stdlib.h> /* realloc() */
+#include <cerrno>
+#include <climits> /* NAME_MAX */
+#include <cstdlib> /* realloc() */
 
 #include <unistd.h> /* close() */
 
@@ -38,14 +38,14 @@
 ****
 ***/
 
-typedef struct tr_watchdir_inotify
+struct tr_watchdir_inotify
 {
     tr_watchdir_backend base;
 
     int infd;
     int inwd;
     struct bufferevent* event;
-} tr_watchdir_inotify;
+};
 
 #define BACKEND_UPCAST(b) ((tr_watchdir_inotify*)(b))
 
@@ -55,11 +55,8 @@ typedef struct tr_watchdir_inotify
 ****
 ***/
 
-static void tr_watchdir_inotify_on_first_scan(evutil_socket_t fd, short type, void* context)
+static void tr_watchdir_inotify_on_first_scan(evutil_socket_t /*fd*/, short /*type*/, void* context)
 {
-    TR_UNUSED(fd);
-    TR_UNUSED(type);
-
     auto const handle = static_cast<tr_watchdir_t>(context);
 
     tr_watchdir_scan(handle, nullptr);
@@ -74,12 +71,12 @@ static void tr_watchdir_inotify_on_event(struct bufferevent* event, void* contex
     tr_watchdir_inotify const* const backend = BACKEND_UPCAST(tr_watchdir_get_backend(handle));
 #endif
     struct inotify_event ev;
-    size_t nread;
     size_t name_size = NAME_MAX + 1;
     char* name = tr_new(char, name_size);
 
     /* Read the size of the struct excluding name into buf. Guaranteed to have at
        least sizeof(ev) available */
+    auto nread = size_t{};
     while ((nread = bufferevent_read(event, &ev, sizeof(ev))) != 0)
     {
         if (nread == (size_t)-1)
@@ -156,9 +153,8 @@ static void tr_watchdir_inotify_free(tr_watchdir_backend* backend_base)
 tr_watchdir_backend* tr_watchdir_inotify_new(tr_watchdir_t handle)
 {
     char const* const path = tr_watchdir_get_path(handle);
-    tr_watchdir_inotify* backend;
 
-    backend = tr_new0(tr_watchdir_inotify, 1);
+    auto* const backend = tr_new0(tr_watchdir_inotify, 1);
     backend->base.free_func = &tr_watchdir_inotify_free;
     backend->infd = -1;
     backend->inwd = -1;

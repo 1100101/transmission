@@ -129,14 +129,13 @@ static auto extract_parts_from_multipart(struct evkeyvalq const* headers, struct
 
     while (delim != nullptr)
     {
-        size_t part_len;
         char const* part = delim + boundary_len;
 
         inlen -= part - in;
         in = part;
 
         delim = tr_memmem(in, inlen, boundary, boundary_len);
-        part_len = delim != nullptr ? (size_t)(delim - part) : inlen;
+        size_t part_len = delim != nullptr ? (size_t)(delim - part) : inlen;
 
         if (part_len != 0)
         {
@@ -198,22 +197,20 @@ static void handle_upload(struct evhttp_request* req, struct tr_rpc_server* serv
             for (auto const& p : parts)
             {
                 auto const& body = p.body;
-                size_t body_len = std::size(body);
-                tr_variant top;
-                tr_variant* args;
-                tr_variant test;
-                bool have_source = false;
-
+                auto body_len = std::size(body);
                 if (body_len >= 2 && memcmp(&body[body_len - 2], "\r\n", 2) == 0)
                 {
                     body_len -= 2;
                 }
 
+                auto top = tr_variant{};
                 tr_variantInitDict(&top, 2);
                 tr_variantDictAddStr(&top, TR_KEY_method, "torrent-add");
-                args = tr_variantDictAddDict(&top, TR_KEY_arguments, 2);
+                auto* const args = tr_variantDictAddDict(&top, TR_KEY_arguments, 2);
                 tr_variantDictAddBool(args, TR_KEY_paused, paused);
 
+                auto test = tr_variant{};
+                auto have_source = bool{ false };
                 if (tr_urlIsValid(body.c_str(), body_len))
                 {
                     tr_variantDictAddRaw(args, TR_KEY_filename, body.c_str(), body_len);
@@ -297,15 +294,12 @@ static void add_response(
     }
     else
     {
-        int state;
         struct evbuffer_iovec iovec[1];
         void* content_ptr = evbuffer_pullup(content, -1);
         size_t const content_len = evbuffer_get_length(content);
 
         if (!server->isStreamInitialized)
         {
-            int compressionLevel;
-
             server->isStreamInitialized = true;
             server->stream.zalloc = (alloc_func)Z_NULL;
             server->stream.zfree = (free_func)Z_NULL;
@@ -314,9 +308,9 @@ static void add_response(
             /* zlib's manual says: "Add 16 to windowBits to write a simple gzip header
              * and trailer around the compressed data instead of a zlib wrapper." */
 #ifdef TR_LIGHTWEIGHT
-            compressionLevel = Z_DEFAULT_COMPRESSION;
+            int const compressionLevel = Z_DEFAULT_COMPRESSION;
 #else
-            compressionLevel = Z_BEST_COMPRESSION;
+            int const compressionLevel = Z_BEST_COMPRESSION;
 #endif
             deflateInit2(&server->stream, compressionLevel, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY);
         }
@@ -330,7 +324,7 @@ static void add_response(
         evbuffer_reserve_space(out, content_len, iovec, 1);
         server->stream.next_out = static_cast<Bytef*>(iovec[0].iov_base);
         server->stream.avail_out = iovec[0].iov_len;
-        state = deflate(&server->stream, Z_FINISH);
+        auto const state = deflate(&server->stream, Z_FINISH);
 
         if (state == Z_STREAM_END)
         {
@@ -367,11 +361,8 @@ static void add_time_header(struct evkeyvalq* headers, char const* key, time_t v
     evhttp_add_header(headers, key, buf);
 }
 
-static void evbuffer_ref_cleanup_tr_free(void const* data, size_t datalen, void* extra)
+static void evbuffer_ref_cleanup_tr_free(void const* /*data*/, size_t /*datalen*/, void* extra)
 {
-    TR_UNUSED(data);
-    TR_UNUSED(datalen);
-
     tr_free(extra);
 }
 
@@ -384,12 +375,9 @@ static void serve_file(struct evhttp_request* req, struct tr_rpc_server* server,
     }
     else
     {
-        void* file;
-        size_t file_len;
+        auto file_len = size_t{};
         tr_error* error = nullptr;
-
-        file_len = 0;
-        file = tr_loadFile(filename, &file_len, &error);
+        void* const file = tr_loadFile(filename, &file_len, &error);
 
         if (file == nullptr)
         {
@@ -400,14 +388,12 @@ static void serve_file(struct evhttp_request* req, struct tr_rpc_server* server,
         }
         else
         {
-            struct evbuffer* content;
-            struct evbuffer* out;
-            time_t const now = tr_time();
+            auto const now = tr_time();
 
-            content = evbuffer_new();
+            auto* const content = evbuffer_new();
             evbuffer_add_reference(content, file, file_len, evbuffer_ref_cleanup_tr_free, file);
 
-            out = evbuffer_new();
+            auto* const out = evbuffer_new();
             evhttp_add_header(req->output_headers, "Content-Type", mimetype_guess(filename));
             add_time_header(req->output_headers, "Date", now);
             add_time_header(req->output_headers, "Expires", now + (24 * 60 * 60));
@@ -440,12 +426,10 @@ static void handle_web_client(struct evhttp_request* req, struct tr_rpc_server* 
     }
     else
     {
-        char* pch;
-        char* subpath;
-
-        subpath = tr_strdup(req->uri + strlen(server->url) + 4);
-
-        if ((pch = strchr(subpath, '?')) != nullptr)
+        // TODO: string_view
+        char* const subpath = tr_strdup(req->uri + strlen(server->url) + 4);
+        char* pch = strchr(subpath, '?');
+        if (pch != nullptr)
         {
             *pch = '\0';
         }
@@ -475,10 +459,8 @@ struct rpc_response_data
     struct tr_rpc_server* server;
 };
 
-static void rpc_response_func(tr_session* session, tr_variant* response, void* user_data)
+static void rpc_response_func(tr_session* /*session*/, tr_variant* response, void* user_data)
 {
-    TR_UNUSED(session);
-
     auto* data = static_cast<struct rpc_response_data*>(user_data);
     struct evbuffer* response_buf = tr_variantToBuf(response, TR_VARIANT_FMT_JSON_LEAN);
     struct evbuffer* buf = evbuffer_new();
@@ -494,11 +476,10 @@ static void rpc_response_func(tr_session* session, tr_variant* response, void* u
 
 static void handle_rpc_from_json(struct evhttp_request* req, struct tr_rpc_server* server, char const* json, size_t json_len)
 {
-    tr_variant top;
-    bool have_content = tr_variantFromJson(&top, json, json_len) == 0;
-    struct rpc_response_data* data;
+    auto top = tr_variant{};
+    auto const have_content = tr_variantFromJson(&top, json, json_len) == 0;
 
-    data = tr_new0(struct rpc_response_data, 1);
+    auto* const data = tr_new0(struct rpc_response_data, 1);
     data->req = req;
     data->server = server;
 
@@ -614,10 +595,6 @@ static void handle_request(struct evhttp_request* req, void* arg)
 
     if (req != nullptr && req->evcon != nullptr)
     {
-        char const* auth;
-        char* user = nullptr;
-        char* pass = nullptr;
-
         evhttp_add_header(req->output_headers, "Server", MY_REALM);
 
         if (server->isAntiBruteForceEnabled && server->loginattempts >= server->antiBruteForceThreshold)
@@ -638,7 +615,24 @@ static void handle_request(struct evhttp_request* req, void* arg)
             return;
         }
 
-        auth = evhttp_find_header(req->input_headers, "Authorization");
+        evhttp_add_header(req->output_headers, "Access-Control-Allow-Origin", "*");
+
+        if (req->type == EVHTTP_REQ_OPTIONS)
+        {
+            char const* headers = evhttp_find_header(req->input_headers, "Access-Control-Request-Headers");
+            if (headers != nullptr)
+            {
+                evhttp_add_header(req->output_headers, "Access-Control-Allow-Headers", headers);
+            }
+
+            evhttp_add_header(req->output_headers, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            send_simple_response(req, 200, "");
+            return;
+        }
+
+        char const* const auth = evhttp_find_header(req->input_headers, "Authorization");
+        char* user = nullptr;
+        char* pass = nullptr;
 
         if (auth != nullptr && evutil_ascii_strncasecmp(auth, "basic ", 6) == 0)
         {
@@ -679,18 +673,21 @@ static void handle_request(struct evhttp_request* req, void* arg)
 
         server->loginattempts = 0;
 
-        if (strncmp(req->uri, server->url, strlen(server->url)) != 0)
+        size_t const server_url_len = strlen(server->url);
+        char const* const location = strncmp(req->uri, server->url, server_url_len) == 0 ? req->uri + server_url_len : nullptr;
+
+        if (location == nullptr || location[0] == '\0' || strcmp(location, "web") == 0)
         {
-            char* location = tr_strdup_printf("%sweb/", server->url);
-            evhttp_add_header(req->output_headers, "Location", location);
+            char* new_location = tr_strdup_printf("%sweb/", server->url);
+            evhttp_add_header(req->output_headers, "Location", new_location);
             send_simple_response(req, HTTP_MOVEPERM, nullptr);
-            tr_free(location);
+            tr_free(new_location);
         }
-        else if (strncmp(req->uri + strlen(server->url), "web/", 4) == 0)
+        else if (strncmp(location, "web/", 4) == 0)
         {
             handle_web_client(req, server);
         }
-        else if (strcmp(req->uri + strlen(server->url), "upload") == 0)
+        else if (strcmp(location, "upload") == 0)
         {
             handle_upload(req, server);
         }
@@ -730,13 +727,14 @@ static void handle_request(struct evhttp_request* req, void* arg)
                 TR_RPC_SESSION_ID_HEADER,
                 sessionId);
             evhttp_add_header(req->output_headers, TR_RPC_SESSION_ID_HEADER, sessionId);
+            evhttp_add_header(req->output_headers, "Access-Control-Expose-Headers", TR_RPC_SESSION_ID_HEADER);
             send_simple_response(req, 409, tmp);
             tr_free(tmp);
         }
 
 #endif
 
-        else if (strncmp(req->uri + strlen(server->url), "rpc", 3) == 0)
+        else if (strncmp(location, "rpc", 3) == 0)
         {
             handle_rpc(req, server);
         }
@@ -749,28 +747,22 @@ static void handle_request(struct evhttp_request* req, void* arg)
     }
 }
 
-enum
-{
-    SERVER_START_RETRY_COUNT = 10,
-    SERVER_START_RETRY_DELAY_STEP = 3,
-    SERVER_START_RETRY_DELAY_INCREMENT = 5,
-    SERVER_START_RETRY_MAX_DELAY = 60
-};
+static auto constexpr ServerStartRetryCount = int{ 10 };
+static auto constexpr ServerStartRetryDelayIncrement = int{ 5 };
+static auto constexpr ServerStartRetryDelayStep = int{ 3 };
+static auto constexpr ServerStartRetryMaxDelay = int{ 60 };
 
 static void startServer(void* vserver);
 
-static void rpc_server_on_start_retry(evutil_socket_t fd, short type, void* context)
+static void rpc_server_on_start_retry(evutil_socket_t /*fd*/, short /*type*/, void* context)
 {
-    TR_UNUSED(fd);
-    TR_UNUSED(type);
-
     startServer(context);
 }
 
 static int rpc_server_start_retry(tr_rpc_server* server)
 {
-    int retry_delay = (server->start_retry_counter / SERVER_START_RETRY_DELAY_STEP + 1) * SERVER_START_RETRY_DELAY_INCREMENT;
-    retry_delay = std::min(retry_delay, int{ SERVER_START_RETRY_MAX_DELAY });
+    int retry_delay = (server->start_retry_counter / ServerStartRetryDelayStep + 1) * ServerStartRetryDelayIncrement;
+    retry_delay = std::min(retry_delay, int{ ServerStartRetryMaxDelay });
 
     if (server->start_retry_timer == nullptr)
     {
@@ -804,6 +796,7 @@ static void startServer(void* vserver)
     }
 
     struct evhttp* httpd = evhttp_new(server->session->event_base);
+    evhttp_set_allowed_methods(httpd, EVHTTP_REQ_GET | EVHTTP_REQ_POST | EVHTTP_REQ_OPTIONS);
 
     char const* address = tr_rpcGetBindAddress(server);
 
@@ -813,7 +806,7 @@ static void startServer(void* vserver)
     {
         evhttp_free(httpd);
 
-        if (server->start_retry_counter < SERVER_START_RETRY_COUNT)
+        if (server->start_retry_counter < ServerStartRetryCount)
         {
             int const retry_delay = rpc_server_start_retry(server);
 
@@ -826,7 +819,7 @@ static void startServer(void* vserver)
             "Unable to bind to %s:%d after %d attempts, giving up",
             address,
             port,
-            SERVER_START_RETRY_COUNT);
+            ServerStartRetryCount);
     }
     else
     {
@@ -1110,12 +1103,12 @@ static void missing_settings_key(tr_quark const q)
 
 tr_rpc_server* tr_rpcInit(tr_session* session, tr_variant* settings)
 {
-    bool boolVal;
-    int64_t i;
-    char const* str;
-    tr_address address;
+    auto address = tr_address{};
+    auto boolVal = bool{};
+    auto i = int64_t{};
+    char const* str = nullptr;
 
-    tr_rpc_server* s = new tr_rpc_server{};
+    tr_rpc_server* const s = new tr_rpc_server{};
     s->session = session;
 
     tr_quark key = TR_KEY_rpc_enabled;
@@ -1141,14 +1134,21 @@ tr_rpc_server* tr_rpcInit(tr_session* session, tr_variant* settings)
     }
 
     key = TR_KEY_rpc_url;
-
-    if (!tr_variantDictFindStr(settings, key, &str, nullptr))
+    auto url_len = size_t{};
+    if (!tr_variantDictFindStr(settings, key, &str, &url_len))
     {
         missing_settings_key(key);
     }
     else
     {
-        s->url = tr_strdup(str);
+        if (url_len == 0 || str[url_len - 1] != '/')
+        {
+            s->url = tr_strdup_printf("%s/", str);
+        }
+        else
+        {
+            s->url = tr_strdup(str);
+        }
     }
 
     key = TR_KEY_rpc_whitelist_enabled;

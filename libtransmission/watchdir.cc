@@ -6,7 +6,7 @@
  *
  */
 
-#include <string.h> /* strcmp() */
+#include <cstring> /* strcmp() */
 
 #include <event2/event.h>
 #include <event2/util.h>
@@ -74,7 +74,7 @@ static bool is_regular_file(char const* dir, char const* name)
     return ret;
 }
 
-static char const* watchdir_status_to_string(tr_watchdir_status status)
+static constexpr char const* watchdir_status_to_string(tr_watchdir_status status)
 {
     switch (status)
     {
@@ -113,14 +113,14 @@ static tr_watchdir_status tr_watchdir_process_impl(tr_watchdir_t handle, char co
 ****
 ***/
 
-typedef struct tr_watchdir_retry
+struct tr_watchdir_retry
 {
     tr_watchdir_t handle;
     char* name;
     size_t counter;
     struct event* timer;
     struct timeval interval;
-} tr_watchdir_retry;
+};
 
 /* Non-static and mutable for unit tests */
 auto tr_watchdir_retry_limit = size_t{ 3 };
@@ -140,11 +140,8 @@ static int compare_retry_names(void const* a, void const* b)
 
 static void tr_watchdir_retry_free(tr_watchdir_retry* retry);
 
-static void tr_watchdir_on_retry_timer(evutil_socket_t fd, short type, void* context)
+static void tr_watchdir_on_retry_timer(evutil_socket_t /*fd*/, short /*type*/, void* context)
 {
-    TR_UNUSED(fd);
-    TR_UNUSED(type);
-
     TR_ASSERT(context != nullptr);
 
     auto* const retry = static_cast<tr_watchdir_retry*>(context);
@@ -175,9 +172,7 @@ static void tr_watchdir_on_retry_timer(evutil_socket_t fd, short type, void* con
 
 static tr_watchdir_retry* tr_watchdir_retry_new(tr_watchdir_t handle, char const* name)
 {
-    tr_watchdir_retry* retry;
-
-    retry = tr_new0(tr_watchdir_retry, 1);
+    auto* const retry = tr_new0(tr_watchdir_retry, 1);
     retry->handle = handle;
     retry->name = tr_strdup(name);
     retry->timer = evtimer_new(handle->event_base, &tr_watchdir_on_retry_timer, retry);
@@ -228,9 +223,7 @@ tr_watchdir_t tr_watchdir_new(
     struct event_base* event_base,
     bool force_generic)
 {
-    tr_watchdir_t handle;
-
-    handle = tr_new0(struct tr_watchdir, 1);
+    auto* handle = tr_new0(struct tr_watchdir, 1);
     handle->path = tr_strdup(path);
     handle->callback = callback;
     handle->callback_user_data = callback_user_data;
@@ -330,18 +323,18 @@ void tr_watchdir_process(tr_watchdir_t handle, char const* name)
 
 void tr_watchdir_scan(tr_watchdir_t handle, std::unordered_set<std::string>* dir_entries)
 {
-    tr_sys_dir_t dir;
-    char const* name;
     auto new_dir_entries = std::unordered_set<std::string>{};
     tr_error* error = nullptr;
 
-    if ((dir = tr_sys_dir_open(handle->path, &error)) == TR_BAD_SYS_DIR)
+    tr_sys_dir_t const dir = tr_sys_dir_open(handle->path, &error);
+    if (dir == TR_BAD_SYS_DIR)
     {
         log_error("Failed to open directory \"%s\" (%d): %s", handle->path, error->code, error->message);
         tr_error_free(error);
         return;
     }
 
+    char const* name = nullptr;
     while ((name = tr_sys_dir_read_name(dir, &error)) != nullptr)
     {
         if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)

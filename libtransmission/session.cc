@@ -63,17 +63,14 @@
 #include "version.h"
 #include "web.h"
 
-enum
-{
 #ifdef TR_LIGHTWEIGHT
-    DEFAULT_CACHE_SIZE_MB = 2,
-    DEFAULT_PREFETCH_ENABLED = false,
+static auto constexpr DefaultCacheSizeMB = int{ 2 };
+static auto constexpr DefaultPrefetchEnabled = bool{ false };
 #else
-    DEFAULT_CACHE_SIZE_MB = 4,
-    DEFAULT_PREFETCH_ENABLED = true,
+static auto constexpr DefaultCacheSizeMB = int{ 4 };
+static auto constexpr DefaultPrefetchEnabled = bool{ true };
 #endif
-    SAVE_INTERVAL_SECS = 360
-};
+static auto constexpr SaveIntervalSecs = int{ 360 };
 
 #define dbgmsg(...) tr_logAddDeepNamed(nullptr, __VA_ARGS__)
 
@@ -86,27 +83,30 @@ static tr_port getRandomPort(tr_session* s)
    characters, where x is the major version number, y is the
    minor version number, z is the maintenance number, and b
    designates beta (Azureus-style) */
-void tr_peerIdInit(uint8_t* buf)
+tr_peer_id_t tr_peerIdInit()
 {
-    int val;
-    int total = 0;
-    char const* pool = "0123456789abcdefghijklmnopqrstuvwxyz";
-    int const base = 36;
+    auto peer_id = tr_peer_id_t{};
+    auto* it = std::data(peer_id);
 
-    memcpy(buf, PEERID_PREFIX, 8);
+    // starts with -TRXXXX-
+    auto constexpr Prefix = std::string_view{ PEERID_PREFIX };
+    auto const* const end = it + std::size(peer_id);
+    it = std::copy_n(std::data(Prefix), std::size(Prefix), it);
 
-    tr_rand_buffer(buf + 8, 11);
-
-    for (int i = 8; i < 19; ++i)
+    // remainder is randomly-generated characters
+    auto constexpr Pool = std::string_view{ "0123456789abcdefghijklmnopqrstuvwxyz" };
+    auto total = int{ 0 };
+    tr_rand_buffer(it, end - it);
+    while (it + 1 < end)
     {
-        val = buf[i] % base;
+        int const val = *it % std::size(Pool);
         total += val;
-        buf[i] = pool[val];
+        *it++ = Pool[val];
     }
+    int const val = total % std::size(Pool) != 0 ? std::size(Pool) - total % std::size(Pool) : 0;
+    *it = Pool[val];
 
-    val = total % base != 0 ? base - total % base : 0;
-    buf[19] = pool[val];
-    buf[20] = '\0';
+    return peer_id;
 }
 
 /***
@@ -166,16 +166,13 @@ static void free_incoming_peer_port(tr_session* session)
     session->bind_ipv6 = nullptr;
 }
 
-static void accept_incoming_peer(evutil_socket_t fd, short what, void* vsession)
+static void accept_incoming_peer(evutil_socket_t fd, short /*what*/, void* vsession)
 {
-    TR_UNUSED(what);
-
-    tr_socket_t clientSocket;
-    tr_port clientPort;
-    tr_address clientAddr;
     auto* session = static_cast<tr_session*>(vsession);
 
-    clientSocket = tr_netAccept(session, fd, &clientAddr, &clientPort);
+    auto clientAddr = tr_address{};
+    auto clientPort = tr_port{};
+    auto const clientSocket = tr_netAccept(session, fd, &clientAddr, &clientPort);
 
     if (clientSocket != TR_BAD_SOCKET)
     {
@@ -198,10 +195,8 @@ static void accept_incoming_peer(evutil_socket_t fd, short what, void* vsession)
 
 static void open_incoming_peer_port(tr_session* session)
 {
-    struct tr_bindinfo* b;
-
     /* bind an ipv4 port to listen for incoming peers... */
-    b = session->bind_ipv4;
+    auto* b = session->bind_ipv4;
     b->socket = tr_netBindTCP(&b->addr, session->private_peer_port, false);
 
     if (b->socket != TR_BAD_SOCKET)
@@ -226,8 +221,8 @@ static void open_incoming_peer_port(tr_session* session)
 
 tr_address const* tr_sessionGetPublicAddress(tr_session const* session, int tr_af_type, bool* is_default_value)
 {
-    char const* default_value;
-    struct tr_bindinfo const* bindinfo;
+    char const* default_value = "";
+    tr_bindinfo const* bindinfo = nullptr;
 
     switch (tr_af_type)
     {
@@ -242,8 +237,6 @@ tr_address const* tr_sessionGetPublicAddress(tr_session const* session, int tr_a
         break;
 
     default:
-        bindinfo = nullptr;
-        default_value = "";
         break;
     }
 
@@ -267,9 +260,6 @@ tr_address const* tr_sessionGetPublicAddress(tr_session const* session, int tr_a
 
 static int parse_tos(char const* tos)
 {
-    char* p;
-    int value;
-
     if (evutil_ascii_strcasecmp(tos, "") == 0)
     {
         return 0;
@@ -305,14 +295,9 @@ static int parse_tos(char const* tos)
         return TR_IPTOS_LOWDELAY;
     }
 
-    value = strtol(tos, &p, 0);
-
-    if (p == nullptr || p == tos)
-    {
-        return 0;
-    }
-
-    return value;
+    char* p = nullptr;
+    int const value = strtol(tos, &p, 0);
+    return p == nullptr || p == tos ? 0 : value;
 }
 
 static char const* format_tos(int value)
@@ -346,10 +331,10 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
 {
     TR_ASSERT(tr_variantIsDict(d));
 
-    tr_variantDictReserve(d, 63);
+    tr_variantDictReserve(d, 69);
     tr_variantDictAddBool(d, TR_KEY_blocklist_enabled, false);
     tr_variantDictAddStr(d, TR_KEY_blocklist_url, "http://www.example.com/blocklist");
-    tr_variantDictAddInt(d, TR_KEY_cache_size_mb, DEFAULT_CACHE_SIZE_MB);
+    tr_variantDictAddInt(d, TR_KEY_cache_size_mb, DefaultCacheSizeMB);
     tr_variantDictAddBool(d, TR_KEY_dht_enabled, true);
     tr_variantDictAddBool(d, TR_KEY_utp_enabled, true);
     tr_variantDictAddBool(d, TR_KEY_lpd_enabled, false);
@@ -374,7 +359,7 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
     tr_variantDictAddBool(d, TR_KEY_pex_enabled, true);
     tr_variantDictAddBool(d, TR_KEY_port_forwarding_enabled, true);
     tr_variantDictAddInt(d, TR_KEY_preallocation, TR_PREALLOCATE_SPARSE);
-    tr_variantDictAddBool(d, TR_KEY_prefetch_enabled, DEFAULT_PREFETCH_ENABLED);
+    tr_variantDictAddBool(d, TR_KEY_prefetch_enabled, DefaultPrefetchEnabled);
     tr_variantDictAddInt(d, TR_KEY_peer_id_ttl_hours, 6);
     tr_variantDictAddBool(d, TR_KEY_queue_stalled_enabled, true);
     tr_variantDictAddInt(d, TR_KEY_queue_stalled_minutes, 30);
@@ -393,6 +378,8 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
     tr_variantDictAddInt(d, TR_KEY_rpc_port, TR_DEFAULT_RPC_PORT);
     tr_variantDictAddStr(d, TR_KEY_rpc_url, TR_DEFAULT_RPC_URL_STR);
     tr_variantDictAddBool(d, TR_KEY_scrape_paused_torrents_enabled, true);
+    tr_variantDictAddStr(d, TR_KEY_script_torrent_added_filename, "");
+    tr_variantDictAddBool(d, TR_KEY_script_torrent_added_enabled, false);
     tr_variantDictAddStr(d, TR_KEY_script_torrent_done_filename, "");
     tr_variantDictAddBool(d, TR_KEY_script_torrent_done_enabled, false);
     tr_variantDictAddInt(d, TR_KEY_seed_queue_size, 10);
@@ -420,7 +407,7 @@ void tr_sessionGetSettings(tr_session* s, tr_variant* d)
 {
     TR_ASSERT(tr_variantIsDict(d));
 
-    tr_variantDictReserve(d, 63);
+    tr_variantDictReserve(d, 68);
     tr_variantDictAddBool(d, TR_KEY_blocklist_enabled, tr_blocklistIsEnabled(s));
     tr_variantDictAddStr(d, TR_KEY_blocklist_url, tr_blocklistGetURL(s));
     tr_variantDictAddInt(d, TR_KEY_cache_size_mb, tr_sessionGetCacheLimit_MB(s));
@@ -466,8 +453,10 @@ void tr_sessionGetSettings(tr_session* s, tr_variant* d)
     tr_variantDictAddStr(d, TR_KEY_rpc_whitelist, tr_sessionGetRPCWhitelist(s));
     tr_variantDictAddBool(d, TR_KEY_rpc_whitelist_enabled, tr_sessionGetRPCWhitelistEnabled(s));
     tr_variantDictAddBool(d, TR_KEY_scrape_paused_torrents_enabled, s->scrapePausedTorrents);
-    tr_variantDictAddBool(d, TR_KEY_script_torrent_done_enabled, tr_sessionIsTorrentDoneScriptEnabled(s));
-    tr_variantDictAddStr(d, TR_KEY_script_torrent_done_filename, tr_sessionGetTorrentDoneScript(s));
+    tr_variantDictAddBool(d, TR_KEY_script_torrent_added_enabled, tr_sessionIsScriptEnabled(s, TR_SCRIPT_ON_TORRENT_ADDED));
+    tr_variantDictAddStr(d, TR_KEY_script_torrent_added_filename, tr_sessionGetScript(s, TR_SCRIPT_ON_TORRENT_ADDED));
+    tr_variantDictAddBool(d, TR_KEY_script_torrent_done_enabled, tr_sessionIsScriptEnabled(s, TR_SCRIPT_ON_TORRENT_DONE));
+    tr_variantDictAddStr(d, TR_KEY_script_torrent_done_filename, tr_sessionGetScript(s, TR_SCRIPT_ON_TORRENT_DONE));
     tr_variantDictAddInt(d, TR_KEY_seed_queue_size, tr_sessionGetQueueSize(s, TR_UP));
     tr_variantDictAddBool(d, TR_KEY_seed_queue_enabled, tr_sessionGetQueueEnabled(s, TR_UP));
     tr_variantDictAddBool(d, TR_KEY_alt_speed_enabled, tr_sessionUsesAltSpeed(s));
@@ -493,15 +482,9 @@ bool tr_sessionLoadSettings(tr_variant* dict, char const* configDir, char const*
 {
     TR_ASSERT(tr_variantIsDict(dict));
 
-    char* filename;
-    tr_variant oldDict;
-    tr_variant fileSettings;
-    bool success;
-    tr_error* error = nullptr;
-
     /* initializing the defaults: caller may have passed in some app-level defaults.
      * preserve those and use the session defaults to fill in any missing gaps. */
-    oldDict = *dict;
+    auto oldDict = *dict;
     tr_variantInitDict(dict, 0);
     tr_sessionGetDefaultSettings(dict);
     tr_variantMergeDicts(dict, &oldDict);
@@ -514,8 +497,10 @@ bool tr_sessionLoadSettings(tr_variant* dict, char const* configDir, char const*
     }
 
     /* file settings override the defaults */
-    filename = tr_buildPath(configDir, "settings.json", nullptr);
-
+    auto fileSettings = tr_variant{};
+    char* const filename = tr_buildPath(configDir, "settings.json", nullptr);
+    auto success = bool{};
+    tr_error* error = nullptr;
     if (tr_variantFromFile(&fileSettings, TR_VARIANT_FMT_JSON, filename, &error))
     {
         tr_variantMergeDicts(dict, &fileSettings);
@@ -582,11 +567,8 @@ void tr_sessionSaveSettings(tr_session* session, char const* configDir, tr_varia
  * status has recently changed. This prevents loss of metadata
  * in the case of a crash, unclean shutdown, clumsy user, etc.
  */
-static void onSaveTimer(evutil_socket_t fd, short what, void* vsession)
+static void onSaveTimer(evutil_socket_t /*fd*/, short /*what*/, void* vsession)
 {
-    TR_UNUSED(fd);
-    TR_UNUSED(what);
-
     auto* session = static_cast<tr_session*>(vsession);
 
     if (tr_cacheFlushDone(session->cache) != 0)
@@ -601,7 +583,7 @@ static void onSaveTimer(evutil_socket_t fd, short what, void* vsession)
 
     tr_statsSaveDirty(session);
 
-    tr_timerAdd(session->saveTimer, SAVE_INTERVAL_SECS, 0);
+    tr_timerAdd(session->saveTimer, SaveIntervalSecs, 0);
 }
 
 /***
@@ -623,9 +605,6 @@ tr_session* tr_sessionInit(char const* configDir, bool messageQueuingEnabled, tr
 {
     TR_ASSERT(tr_variantIsDict(clientSettings));
 
-    int64_t i;
-    struct init_data data;
-
     tr_timeUpdate(time(nullptr));
 
     /* initialize the bare skeleton of the session object */
@@ -636,10 +615,11 @@ tr_session* tr_sessionInit(char const* configDir, bool messageQueuingEnabled, tr
     session->cache = tr_cacheNew(1024 * 1024 * 2);
     session->magicNumber = SESSION_MAGIC_NUMBER;
     session->session_id = tr_session_id_new();
-    tr_bandwidthConstruct(&session->bandwidth, nullptr);
+    session->bandwidth = new Bandwidth(nullptr);
     tr_variantInitList(&session->removedTorrents, 0);
 
     /* nice to start logging at the very beginning */
+    auto i = int64_t{};
     if (tr_variantDictFindInt(clientSettings, TR_KEY_message_level, &i))
     {
         tr_logSetLevel(tr_log_level(i));
@@ -651,6 +631,8 @@ tr_session* tr_sessionInit(char const* configDir, bool messageQueuingEnabled, tr
     TR_ASSERT(session->events != nullptr);
 
     /* run the rest in the libtransmission thread */
+
+    auto data = init_data{};
     data.done = false;
     data.session = session;
     data.configDir = configDir;
@@ -668,20 +650,13 @@ tr_session* tr_sessionInit(char const* configDir, bool messageQueuingEnabled, tr
 
 static void turtleCheckClock(tr_session* s, struct tr_turtle_info* t);
 
-static void onNowTimer(evutil_socket_t fd, short what, void* vsession)
+static void onNowTimer(evutil_socket_t /*fd*/, short /*what*/, void* vsession)
 {
-    TR_UNUSED(fd);
-    TR_UNUSED(what);
-
     auto* session = static_cast<tr_session*>(vsession);
 
     TR_ASSERT(tr_isSession(session));
     TR_ASSERT(session->nowTimer != nullptr);
 
-    int usec;
-    int const min = 100;
-    int const max = 999999;
-    struct timeval tv;
     time_t const now = time(nullptr);
 
     /**
@@ -720,18 +695,11 @@ static void onNowTimer(evutil_socket_t fd, short what, void* vsession)
     **/
 
     /* schedule the next timer for right after the next second begins */
+    struct timeval tv;
     tr_gettimeofday(&tv);
-    usec = 1000000 - tv.tv_usec;
-
-    if (usec > max)
-    {
-        usec = max;
-    }
-
-    if (usec < min)
-    {
-        usec = min;
-    }
+    int constexpr Min = 100;
+    int constexpr Max = 999999;
+    int const usec = std::clamp(int(1000000 - tv.tv_usec), Min, Max);
 
     tr_timerAdd(session->nowTimer, 0, usec);
 }
@@ -786,7 +754,7 @@ static void tr_sessionInitImpl(void* vdata)
     TR_ASSERT(tr_isSession(session));
 
     session->saveTimer = evtimer_new(session->event_base, onSaveTimer, session);
-    tr_timerAdd(session->saveTimer, SAVE_INTERVAL_SECS, 0);
+    tr_timerAdd(session->saveTimer, SaveIntervalSecs, 0);
 
     tr_announcerInit(session);
 
@@ -823,12 +791,12 @@ static void sessionSetImpl(void* vdata)
     TR_ASSERT(tr_variantIsDict(settings));
     TR_ASSERT(tr_amInEventThread(session));
 
-    int64_t i;
-    double d;
-    bool boolVal;
-    char const* strVal;
-    struct tr_bindinfo b;
-    struct tr_turtle_info* turtle = &session->turtle;
+    auto b = tr_bindinfo{};
+    auto boolVal = bool{};
+    auto d = double{};
+    auto i = int64_t{};
+    char const* strVal = nullptr;
+    tr_turtle_info* const turtle = &session->turtle;
 
     if (tr_variantDictFindInt(settings, TR_KEY_message_level, &i))
     {
@@ -1139,14 +1107,24 @@ static void sessionSetImpl(void* vdata)
     ***  Scripts
     **/
 
+    if (tr_variantDictFindBool(settings, TR_KEY_script_torrent_added_enabled, &boolVal))
+    {
+        tr_sessionSetScriptEnabled(session, TR_SCRIPT_ON_TORRENT_ADDED, boolVal);
+    }
+
+    if (tr_variantDictFindStr(settings, TR_KEY_script_torrent_added_filename, &strVal, nullptr))
+    {
+        tr_sessionSetScript(session, TR_SCRIPT_ON_TORRENT_ADDED, strVal);
+    }
+
     if (tr_variantDictFindBool(settings, TR_KEY_script_torrent_done_enabled, &boolVal))
     {
-        tr_sessionSetTorrentDoneScriptEnabled(session, boolVal);
+        tr_sessionSetScriptEnabled(session, TR_SCRIPT_ON_TORRENT_DONE, boolVal);
     }
 
     if (tr_variantDictFindStr(settings, TR_KEY_script_torrent_done_filename, &strVal, nullptr))
     {
-        tr_sessionSetTorrentDoneScript(session, strVal);
+        tr_sessionSetScript(session, TR_SCRIPT_ON_TORRENT_DONE, strVal);
     }
 
     if (tr_variantDictFindBool(settings, TR_KEY_scrape_paused_torrents_enabled, &boolVal))
@@ -1197,7 +1175,7 @@ void tr_sessionSetDownloadDir(tr_session* session, char const* dir)
 
     struct tr_device_info* info = nullptr;
 
-    if (dir != nullptr)
+    if (!tr_str_is_empty(dir))
     {
         info = tr_device_info_create(dir);
     }
@@ -1222,18 +1200,8 @@ char const* tr_sessionGetDownloadDir(tr_session const* session)
 
 int64_t tr_sessionGetDirFreeSpace(tr_session* session, char const* dir)
 {
-    int64_t free_space;
-
-    if (tr_strcmp0(dir, tr_sessionGetDownloadDir(session)) == 0)
-    {
-        free_space = tr_device_info_get_free_space(session->downloadDir);
-    }
-    else
-    {
-        free_space = tr_getDirFreeSpace(dir);
-    }
-
-    return free_space;
+    return tr_strcmp0(dir, tr_sessionGetDownloadDir(session)) == 0 ? tr_device_info_get_disk_space(session->downloadDir).free :
+                                                                     tr_getDirSpace(dir).free;
 }
 
 /***
@@ -1494,23 +1462,18 @@ static void updateBandwidth(tr_session* session, tr_direction dir)
     bool const isLimited = tr_sessionGetActiveSpeedLimit_Bps(session, dir, &limit_Bps);
     bool const zeroCase = isLimited && limit_Bps == 0;
 
-    tr_bandwidthSetLimited(&session->bandwidth, dir, isLimited && !zeroCase);
+    session->bandwidth->setLimited(dir, isLimited && !zeroCase);
 
-    tr_bandwidthSetDesiredSpeed_Bps(&session->bandwidth, dir, limit_Bps);
+    session->bandwidth->setDesiredSpeedBytesPerSecond(dir, limit_Bps);
 }
 
-enum
-{
-    MINUTES_PER_HOUR = 60,
-    MINUTES_PER_DAY = MINUTES_PER_HOUR * 24,
-    MINUTES_PER_WEEK = MINUTES_PER_DAY * 7
-};
+static auto constexpr MinutesPerHour = int{ 60 };
+static auto constexpr MinutesPerDay = int{ MinutesPerHour * 24 };
+static auto constexpr MinutesPerWeek = int{ MinutesPerDay * 7 };
 
 static void turtleUpdateTable(struct tr_turtle_info* t)
 {
-    tr_bitfield* b = &t->minutes;
-
-    tr_bitfieldSetHasNone(b);
+    t->minutes->setHasNone();
 
     for (int day = 0; day < 7; ++day)
     {
@@ -1521,12 +1484,12 @@ static void turtleUpdateTable(struct tr_turtle_info* t)
 
             if (end <= begin)
             {
-                end += MINUTES_PER_DAY;
+                end += MinutesPerDay;
             }
 
             for (time_t i = begin; i < end; ++i)
             {
-                tr_bitfieldAdd(b, (i + day * MINUTES_PER_DAY) % MINUTES_PER_WEEK);
+                t->minutes->set((i + day * MinutesPerDay) % MinutesPerWeek);
             }
         }
     }
@@ -1567,23 +1530,21 @@ static void useAltSpeed(tr_session* s, struct tr_turtle_info* t, bool enabled, b
  */
 static bool getInTurtleTime(struct tr_turtle_info const* t)
 {
-    struct tm tm;
-    size_t minute_of_the_week;
     time_t const now = tr_time();
-
+    struct tm tm;
     tr_localtime_r(&now, &tm);
 
-    minute_of_the_week = tm.tm_wday * MINUTES_PER_DAY + tm.tm_hour * MINUTES_PER_HOUR + tm.tm_min;
+    size_t minute_of_the_week = tm.tm_wday * MinutesPerDay + tm.tm_hour * MinutesPerHour + tm.tm_min;
 
-    if (minute_of_the_week >= MINUTES_PER_WEEK) /* leap minutes? */
+    if (minute_of_the_week >= MinutesPerWeek) /* leap minutes? */
     {
-        minute_of_the_week = MINUTES_PER_WEEK - 1;
+        minute_of_the_week = MinutesPerWeek - 1;
     }
 
-    return tr_bitfieldHas(&t->minutes, minute_of_the_week);
+    return t->minutes->test(minute_of_the_week);
 }
 
-static inline tr_auto_switch_state_t autoSwitchState(bool enabled)
+static constexpr tr_auto_switch_state_t autoSwitchState(bool enabled)
 {
     return enabled ? TR_AUTO_SWITCH_ON : TR_AUTO_SWITCH_OFF;
 }
@@ -1612,7 +1573,7 @@ static void turtleBootstrap(tr_session* session, struct tr_turtle_info* turtle)
     turtle->changedByUser = false;
     turtle->autoTurtleState = TR_AUTO_SWITCH_UNUSED;
 
-    tr_bitfieldConstruct(&turtle->minutes, MINUTES_PER_WEEK);
+    turtle->minutes = new tr_bitfield(MinutesPerWeek);
 
     turtleUpdateTable(turtle);
 
@@ -1891,12 +1852,12 @@ bool tr_sessionGetDeleteSource(tr_session const* session)
 
 unsigned int tr_sessionGetPieceSpeed_Bps(tr_session const* session, tr_direction dir)
 {
-    return tr_isSession(session) ? tr_bandwidthGetPieceSpeed_Bps(&session->bandwidth, 0, dir) : 0;
+    return tr_isSession(session) ? session->bandwidth->getPieceSpeedBytesPerSecond(0, dir) : 0;
 }
 
 static unsigned int tr_sessionGetRawSpeed_Bps(tr_session const* session, tr_direction dir)
 {
-    return tr_isSession(session) ? tr_bandwidthGetRawSpeed_Bps(&session->bandwidth, 0, dir) : 0;
+    return tr_isSession(session) ? session->bandwidth->getRawSpeedBytesPerSecond(0, dir) : 0;
 }
 
 double tr_sessionGetRawSpeed_KBps(tr_session const* session, tr_direction dir)
@@ -1989,11 +1950,8 @@ static void sessionCloseImplStart(tr_session* session)
 
 static void sessionCloseImplFinish(tr_session* session);
 
-static void sessionCloseImplWaitForIdleUdp(evutil_socket_t fd, short what, void* vsession)
+static void sessionCloseImplWaitForIdleUdp(evutil_socket_t /*fd*/, short /*what*/, void* vsession)
 {
-    TR_UNUSED(fd);
-    TR_UNUSED(what);
-
     auto* session = static_cast<tr_session*>(vsession);
 
     TR_ASSERT(tr_isSession(session));
@@ -2112,8 +2070,8 @@ void tr_sessionClose(tr_session* session)
 
     /* free the session memory */
     tr_variantFree(&session->removedTorrents);
-    tr_bandwidthDestruct(&session->bandwidth);
-    tr_bitfieldDestruct(&session->turtle.minutes);
+    delete session->bandwidth;
+    delete session->turtle.minutes;
     tr_session_id_free(session->session_id);
     tr_lockFree(session->lock);
 
@@ -2124,7 +2082,6 @@ void tr_sessionClose(tr_session* session)
     }
 
     tr_device_info_free(session->downloadDir);
-    tr_free(session->torrentDoneScript);
     tr_free(session->configDir);
     tr_free(session->resumeDir);
     tr_free(session->torrentDir);
@@ -2159,17 +2116,16 @@ static void sessionLoadTorrents(void* vdata)
     auto torrents = std::list<tr_torrent*>{};
     if (odir != TR_BAD_SYS_DIR)
     {
-        char const* name;
-
+        char const* name = nullptr;
         while ((name = tr_sys_dir_read_name(odir, nullptr)) != nullptr)
         {
             if (tr_str_has_suffix(name, ".torrent"))
             {
-                tr_torrent* tor;
-                char* path = tr_buildPath(dirname, name, nullptr);
+                char* const path = tr_buildPath(dirname, name, nullptr);
                 tr_ctorSetMetainfoFromFile(data->ctor, path);
 
-                if ((tor = tr_torrentNew(data->ctor, nullptr, nullptr)) != nullptr)
+                tr_torrent* const tor = tr_torrentNew(data->ctor, nullptr, nullptr);
+                if (tor != nullptr)
                 {
                     torrents.push_back(tor);
                 }
@@ -2294,6 +2250,8 @@ static void toggle_utp(void* vsession)
 
     tr_udpSetSocketBuffers(session);
 
+    tr_udpSetSocketTOS(session);
+
     /* But don't call tr_utpClose -- see reset_timer in tr-utp.c for an
        explanation. */
 }
@@ -2390,8 +2348,7 @@ static void setPortForwardingEnabled(void* vdata)
 
 void tr_sessionSetPortForwardingEnabled(tr_session* session, bool enabled)
 {
-    struct port_forwarding_data* d;
-    d = tr_new0(struct port_forwarding_data, 1);
+    auto* const d = tr_new0(struct port_forwarding_data, 1);
     d->shared = session->shared;
     d->enabled = enabled;
     tr_runInEventThread(session, setPortForwardingEnabled, d);
@@ -2418,15 +2375,12 @@ static bool tr_stringEndsWith(char const* strval, char const* end)
 
 static void loadBlocklists(tr_session* session)
 {
-    tr_sys_dir_t odir;
-    char* dirname;
-    char const* name;
     auto loadme = std::unordered_set<std::string>{};
-    bool const isEnabled = session->isBlocklistEnabled;
+    auto const isEnabled = session->isBlocklistEnabled;
 
     /* walk the blocklist directory... */
-    dirname = tr_buildPath(session->configDir, "blocklists", nullptr);
-    odir = tr_sys_dir_open(dirname, nullptr);
+    char* const dirname = tr_buildPath(session->configDir, "blocklists", nullptr);
+    auto const odir = tr_sys_dir_open(dirname, nullptr);
 
     if (odir == TR_BAD_SYS_DIR)
     {
@@ -2434,9 +2388,9 @@ static void loadBlocklists(tr_session* session)
         return;
     }
 
+    char const* name = nullptr;
     while ((name = tr_sys_dir_read_name(odir, nullptr)) != nullptr)
     {
-        char* path;
         char* load = nullptr;
 
         if (name[0] == '.') /* ignore dotfiles */
@@ -2444,7 +2398,7 @@ static void loadBlocklists(tr_session* session)
             continue;
         }
 
-        path = tr_buildPath(dirname, name, nullptr);
+        char* const path = tr_buildPath(dirname, name, nullptr);
 
         if (tr_stringEndsWith(path, ".bin"))
         {
@@ -2452,11 +2406,10 @@ static void loadBlocklists(tr_session* session)
         }
         else
         {
-            char* binname;
             tr_sys_path_info path_info;
             tr_sys_path_info binname_info;
 
-            binname = tr_strdup_printf("%s" TR_PATH_DELIMITER_STR "%s.bin", dirname, name);
+            char* const binname = tr_strdup_printf("%s" TR_PATH_DELIMITER_STR "%s.bin", dirname, name);
 
             if (!tr_sys_path_get_info(binname, 0, &binname_info, nullptr)) /* create it */
             {
@@ -2474,13 +2427,10 @@ static void loadBlocklists(tr_session* session)
                 tr_sys_path_get_info(path, 0, &path_info, nullptr) &&
                 path_info.last_modified_at >= binname_info.last_modified_at) /* update it */
             {
-                char* old;
-                tr_blocklistFile* b;
-
-                old = tr_strdup_printf("%s.old", binname);
+                char* const old = tr_strdup_printf("%s.old", binname);
                 tr_sys_path_remove(old, nullptr);
                 tr_sys_path_rename(binname, old, nullptr);
-                b = tr_blocklistFileNew(binname, isEnabled);
+                auto* const b = tr_blocklistFileNew(binname, isEnabled);
 
                 if (tr_blocklistFileSetContent(b, path) > 0)
                 {
@@ -2651,9 +2601,8 @@ static void metainfoLookupInit(tr_session* session)
         tr_ctor* ctor = tr_ctorNew(session);
         tr_ctorSetSave(ctor, false); /* since we already have them */
 
-        char const* name;
-
         /* walk through the directory and find the mappings */
+        char const* name = nullptr;
         while ((name = tr_sys_dir_read_name(odir, nullptr)) != nullptr)
         {
             if (tr_str_has_suffix(name, ".torrent"))
@@ -2665,7 +2614,7 @@ static void metainfoLookupInit(tr_session* session)
                 if (tr_torrentParse(ctor, &inf) == TR_PARSE_OK)
                 {
                     ++n;
-                    tr_variantDictAddStr(lookup, tr_quark_new(inf.hashString, TR_BAD_SIZE), path);
+                    tr_variantDictAddStr(lookup, tr_quark_new(inf.hashString), path);
                 }
 
                 tr_free(path);
@@ -2688,7 +2637,7 @@ char const* tr_sessionFindTorrentFile(tr_session const* session, char const* has
     }
 
     char const* filename = nullptr;
-    (void)tr_variantDictFindStr(session->metainfoLookup, tr_quark_new(hashString, TR_BAD_SIZE), &filename, nullptr);
+    (void)tr_variantDictFindStr(session->metainfoLookup, tr_quark_new(hashString), &filename, nullptr);
     return filename;
 }
 
@@ -2700,7 +2649,7 @@ void tr_sessionSetTorrentFile(tr_session* session, char const* hashString, char 
      * lookup table hasn't been built yet */
     if (session->metainfoLookup != nullptr)
     {
-        tr_variantDictAddStr(session->metainfoLookup, tr_quark_new(hashString, TR_BAD_SIZE), filename);
+        tr_variantDictAddStr(session->metainfoLookup, tr_quark_new(hashString), filename);
     }
 }
 
@@ -2839,36 +2788,36 @@ char const* tr_sessionGetRPCBindAddress(tr_session const* session)
 *****
 ****/
 
-bool tr_sessionIsTorrentDoneScriptEnabled(tr_session const* session)
+void tr_sessionSetScriptEnabled(tr_session* session, TrScript type, bool enabled)
 {
     TR_ASSERT(tr_isSession(session));
+    TR_ASSERT(type < TR_SCRIPT_N_TYPES);
 
-    return session->isTorrentDoneScriptEnabled;
+    session->scripts_enabled[type] = enabled;
 }
 
-void tr_sessionSetTorrentDoneScriptEnabled(tr_session* session, bool isEnabled)
+bool tr_sessionIsScriptEnabled(tr_session const* session, TrScript type)
 {
     TR_ASSERT(tr_isSession(session));
+    TR_ASSERT(type < TR_SCRIPT_N_TYPES);
 
-    session->isTorrentDoneScriptEnabled = isEnabled;
+    return session->scripts_enabled[type];
 }
 
-char const* tr_sessionGetTorrentDoneScript(tr_session const* session)
+void tr_sessionSetScript(tr_session* session, TrScript type, char const* script)
 {
     TR_ASSERT(tr_isSession(session));
+    TR_ASSERT(type < TR_SCRIPT_N_TYPES);
 
-    return session->torrentDoneScript;
+    session->scripts[type].assign(script ? script : "");
 }
 
-void tr_sessionSetTorrentDoneScript(tr_session* session, char const* scriptFilename)
+char const* tr_sessionGetScript(tr_session const* session, TrScript type)
 {
     TR_ASSERT(tr_isSession(session));
+    TR_ASSERT(type < TR_SCRIPT_N_TYPES);
 
-    if (session->torrentDoneScript != scriptFilename)
-    {
-        tr_free(session->torrentDoneScript);
-        session->torrentDoneScript = tr_strdup(scriptFilename);
-    }
+    return session->scripts[type].c_str();
 }
 
 /***
@@ -2981,7 +2930,7 @@ std::vector<tr_torrent*> tr_sessionGetNextQueuedTorrents(tr_session* session, tr
     }
 
     // find the best n candidates
-    num_wanted = std::min(num_wanted, candidates.size());
+    num_wanted = std::min(num_wanted, std::size(candidates));
     if (num_wanted < candidates.size())
     {
         std::partial_sort(

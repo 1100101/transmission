@@ -71,28 +71,28 @@ static bool verify = false;
 static sig_atomic_t gotsig = false;
 static sig_atomic_t manualUpdate = false;
 
-static char const* torrentPath = NULL;
+static char const* torrentPath = nullptr;
 
 static struct tr_option const options[] = {
-    { 'b', "blocklist", "Enable peer blocklists", "b", false, NULL },
-    { 'B', "no-blocklist", "Disable peer blocklists", "B", false, NULL },
+    { 'b', "blocklist", "Enable peer blocklists", "b", false, nullptr },
+    { 'B', "no-blocklist", "Disable peer blocklists", "B", false, nullptr },
     { 'd', "downlimit", "Set max download speed in " SPEED_K_STR, "d", true, "<speed>" },
-    { 'D', "no-downlimit", "Don't limit the download speed", "D", false, NULL },
-    { 910, "encryption-required", "Encrypt all peer connections", "er", false, NULL },
-    { 911, "encryption-preferred", "Prefer encrypted peer connections", "ep", false, NULL },
-    { 912, "encryption-tolerated", "Prefer unencrypted peer connections", "et", false, NULL },
+    { 'D', "no-downlimit", "Don't limit the download speed", "D", false, nullptr },
+    { 910, "encryption-required", "Encrypt all peer connections", "er", false, nullptr },
+    { 911, "encryption-preferred", "Prefer encrypted peer connections", "ep", false, nullptr },
+    { 912, "encryption-tolerated", "Prefer unencrypted peer connections", "et", false, nullptr },
     { 'f', "finish", "Run a script when the torrent finishes", "f", true, "<script>" },
     { 'g', "config-dir", "Where to find configuration files", "g", true, "<path>" },
-    { 'm', "portmap", "Enable portmapping via NAT-PMP or UPnP", "m", false, NULL },
-    { 'M', "no-portmap", "Disable portmapping", "M", false, NULL },
+    { 'm', "portmap", "Enable portmapping via NAT-PMP or UPnP", "m", false, nullptr },
+    { 'M', "no-portmap", "Disable portmapping", "M", false, nullptr },
     { 'p', "port", "Port for incoming peers (Default: " TR_DEFAULT_PEER_PORT_STR ")", "p", true, "<port>" },
     { 't', "tos", "Peer socket TOS (0 to 255, default=" TR_DEFAULT_PEER_SOCKET_TOS_STR ")", "t", true, "<tos>" },
     { 'u', "uplimit", "Set max upload speed in " SPEED_K_STR, "u", true, "<speed>" },
-    { 'U', "no-uplimit", "Don't limit the upload speed", "U", false, NULL },
-    { 'v', "verify", "Verify the specified torrent", "v", false, NULL },
-    { 'V', "version", "Show version number and exit", "V", false, NULL },
+    { 'U', "no-uplimit", "Don't limit the upload speed", "U", false, nullptr },
+    { 'v', "verify", "Verify the specified torrent", "v", false, nullptr },
+    { 'V', "version", "Show version number and exit", "V", false, nullptr },
     { 'w', "download-dir", "Where to save downloaded data", "w", true, "<path>" },
-    { 0, NULL, NULL, NULL, false, NULL }
+    { 0, nullptr, nullptr, nullptr, false, nullptr }
 };
 
 static char const* getUsage(void)
@@ -138,19 +138,14 @@ static char* tr_strlratio(char* buf, double ratio, size_t buflen)
 static bool waitingOnWeb;
 
 static void onTorrentFileDownloaded(
-    tr_session* session,
-    bool did_connect,
-    bool did_timeout,
-    long response_code,
+    tr_session* /*session*/,
+    bool /*did_connect*/,
+    bool /*did_timeout*/,
+    long /*response_code*/,
     void const* response,
     size_t response_byte_count,
     void* vctor)
 {
-    TR_UNUSED(session);
-    TR_UNUSED(did_connect);
-    TR_UNUSED(did_timeout);
-    TR_UNUSED(response_code);
-
     auto* ctor = static_cast<tr_ctor*>(vctor);
     tr_ctorSetMetainfo(ctor, response, response_byte_count);
     waitingOnWeb = false;
@@ -219,7 +214,7 @@ static void getStatusStr(tr_stat const* st, char* buf, size_t buflen)
 static char const* getConfigDir(int argc, char const** argv)
 {
     int c;
-    char const* configDir = NULL;
+    char const* configDir = nullptr;
     char const* optarg;
     int const ind = tr_optind;
 
@@ -234,7 +229,7 @@ static char const* getConfigDir(int argc, char const** argv)
 
     tr_optind = ind;
 
-    if (configDir == NULL)
+    if (configDir == nullptr)
     {
         configDir = tr_getDefaultConfigDir(MY_CONFIG_NAME);
     }
@@ -246,7 +241,7 @@ int tr_main(int argc, char* argv[])
 {
     tr_session* h;
     tr_ctor* ctor;
-    tr_torrent* tor = NULL;
+    tr_torrent* tor = nullptr;
     tr_variant settings;
     char const* configDir;
     uint8_t* fileContents;
@@ -283,15 +278,15 @@ int tr_main(int argc, char* argv[])
     }
 
     /* Check the options for validity */
-    if (torrentPath == NULL)
+    if (torrentPath == nullptr)
     {
         fprintf(stderr, "No torrent specified!\n");
         return EXIT_FAILURE;
     }
 
-    if (tr_variantDictFindStr(&settings, TR_KEY_download_dir, &str, NULL) && !tr_sys_path_exists(str, NULL))
+    if (tr_variantDictFindStr(&settings, TR_KEY_download_dir, &str, nullptr) && !tr_sys_path_exists(str, nullptr))
     {
-        tr_error* error = NULL;
+        tr_error* error = nullptr;
 
         if (!tr_sys_dir_create(str, TR_SYS_DIR_CREATE_PARENTS, 0700, &error))
         {
@@ -305,10 +300,10 @@ int tr_main(int argc, char* argv[])
 
     ctor = tr_ctorNew(h);
 
-    fileContents = tr_loadFile(torrentPath, &fileLength, NULL);
+    fileContents = tr_loadFile(torrentPath, &fileLength, nullptr);
     tr_ctorSetPaused(ctor, TR_FORCE, false);
 
-    if (fileContents != NULL)
+    if (fileContents != nullptr)
     {
         tr_ctorSetMetainfo(ctor, fileContents, fileLength);
     }
@@ -337,10 +332,10 @@ int tr_main(int argc, char* argv[])
 
     tr_free(fileContents);
 
-    tor = tr_torrentNew(ctor, NULL, NULL);
+    tor = tr_torrentNew(ctor, nullptr, nullptr);
     tr_ctorFree(ctor);
 
-    if (tor == NULL)
+    if (tor == nullptr)
     {
         fprintf(stderr, "Failed opening torrent file `%s'\n", torrentPath);
         tr_sessionClose(h);
@@ -356,7 +351,7 @@ int tr_main(int argc, char* argv[])
     if (verify)
     {
         verify = false;
-        tr_torrentVerify(tor, NULL, NULL);
+        tr_torrentVerify(tor, nullptr, nullptr);
     }
 
     for (;;)
@@ -364,7 +359,7 @@ int tr_main(int argc, char* argv[])
         char line[LINEWIDTH];
         tr_stat const* st;
         char const* messageName[] = {
-            NULL,
+            nullptr,
             "Tracker gave a warning:",
             "Tracker gave an error:",
             "Error:",
@@ -507,7 +502,7 @@ static int parseCommandLine(tr_variant* d, int argc, char const** argv)
             break;
 
         case TR_OPT_UNK:
-            if (torrentPath == NULL)
+            if (torrentPath == nullptr)
             {
                 torrentPath = optarg;
             }

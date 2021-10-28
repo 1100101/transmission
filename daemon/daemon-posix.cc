@@ -24,8 +24,8 @@
 ****
 ***/
 
-static dtr_callbacks const* callbacks = NULL;
-static void* callback_arg = NULL;
+static dtr_callbacks const* callbacks = nullptr;
+static void* callback_arg = nullptr;
 
 static int signal_pipe[2];
 
@@ -72,10 +72,8 @@ static void send_signal_to_pipe(int sig)
     errno = old_errno;
 }
 
-static void* signal_handler_thread_main(void* arg)
+static void* signal_handler_thread_main(void* /*arg*/)
 {
-    TR_UNUSED(arg);
-
     int sig;
 
     while (read(signal_pipe[0], &sig, sizeof(sig)) == sizeof(sig) && sig != 0)
@@ -83,7 +81,7 @@ static void* signal_handler_thread_main(void* arg)
         handle_signal(sig);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 static bool create_signal_pipe(tr_error** error)
@@ -110,7 +108,7 @@ static bool create_signal_handler_thread(pthread_t* thread, tr_error** error)
         return false;
     }
 
-    if ((errno = pthread_create(thread, NULL, &signal_handler_thread_main, NULL)) != 0)
+    if ((errno = pthread_create(thread, nullptr, &signal_handler_thread_main, nullptr)) != 0)
     {
         set_system_error(error, errno, "pthread_create() failed");
         destroy_signal_pipe();
@@ -123,7 +121,7 @@ static bool create_signal_handler_thread(pthread_t* thread, tr_error** error)
 static void destroy_signal_handler_thread(pthread_t thread)
 {
     send_signal_to_pipe(0);
-    pthread_join(thread, NULL);
+    pthread_join(thread, nullptr);
 
     destroy_signal_pipe();
 }

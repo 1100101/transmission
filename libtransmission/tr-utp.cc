@@ -23,7 +23,7 @@ THE SOFTWARE.
 
 #include <event2/event.h>
 
-#include <stdint.h>
+#include <cstdint>
 #include <libutp/utp.h>
 
 #include "transmission.h"
@@ -62,40 +62,37 @@ bool UTP_Write(struct UTPSocket* socket, size_t count)
     return false;
 }
 
-int tr_utpPacket(unsigned char const* buf, size_t buflen, struct sockaddr const* from, socklen_t fromlen, tr_session* ss)
+int tr_utpPacket(
+    unsigned char const* /*buf*/,
+    size_t /*buflen*/,
+    sockaddr const* /*from*/,
+    socklen_t /*fromlen*/,
+    tr_session* /*ss*/)
 {
-    TR_UNUSED(buf);
-    TR_UNUSED(buflen);
-    TR_UNUSED(from);
-    TR_UNUSED(fromlen);
-    TR_UNUSED(ss);
-
     return -1;
 }
 
-struct UTPSocket* UTP_Create(SendToProc* send_to_proc, void* send_to_userdata, struct sockaddr const* addr, socklen_t addrlen)
+struct UTPSocket* UTP_Create(
+    SendToProc* /*send_to_proc*/,
+    void* /*send_to_userdata*/,
+    sockaddr const* /*addr*/,
+    socklen_t /*addrlen*/)
 {
-    TR_UNUSED(send_to_proc);
-    TR_UNUSED(send_to_userdata);
-    TR_UNUSED(addr);
-    TR_UNUSED(addrlen);
-
     errno = ENOSYS;
     return nullptr;
 }
 
-void tr_utpClose(tr_session* ss)
+void tr_utpClose(tr_session* /*ss*/)
 {
-    TR_UNUSED(ss);
 }
 
-void tr_utpSendTo(void* closure, unsigned char const* buf, size_t buflen, struct sockaddr const* to, socklen_t tolen)
+void tr_utpSendTo(
+    void* /*closure*/,
+    unsigned char const* /*buf*/,
+    size_t /*buflen*/,
+    struct sockaddr const* /*to*/,
+    socklen_t /*tolen*/)
 {
-    TR_UNUSED(closure);
-    TR_UNUSED(buf);
-    TR_UNUSED(buflen);
-    TR_UNUSED(to);
-    TR_UNUSED(tolen);
 }
 
 #else
@@ -111,7 +108,7 @@ static void incoming(void* vsession, struct UTPSocket* s)
     struct sockaddr* from = (struct sockaddr*)&from_storage;
     socklen_t fromlen = sizeof(from_storage);
     tr_address addr;
-    tr_port port;
+    tr_port port = 0;
 
     if (!tr_sessionIsUTPEnabled(session))
     {
@@ -147,8 +144,8 @@ void tr_utpSendTo(void* closure, unsigned char const* buf, size_t buflen, struct
 
 static void reset_timer(tr_session* ss)
 {
-    int sec;
-    int usec;
+    int sec = 0;
+    int usec = 0;
 
     if (tr_sessionIsUTPEnabled(ss))
     {
@@ -169,11 +166,8 @@ static void reset_timer(tr_session* ss)
     tr_timerAdd(ss->utp_timer, sec, usec);
 }
 
-static void timer_callback(evutil_socket_t s, short type, void* vsession)
+static void timer_callback(evutil_socket_t /*s*/, short /*type*/, void* vsession)
 {
-    TR_UNUSED(s);
-    TR_UNUSED(type);
-
     auto* session = static_cast<tr_session*>(vsession);
     UTP_CheckTimeouts();
     reset_timer(session);

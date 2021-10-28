@@ -131,19 +131,15 @@ typedef NS_ENUM(unsigned int, sortOrderTag) { //
 
 #define DONATE_NAG_TIME (60 * 60 * 24 * 7)
 
-static void altSpeedToggledCallback(tr_session* handle, bool active, bool byUser, void* controller)
+static void altSpeedToggledCallback([[maybe_unused]] tr_session* handle, bool active, bool byUser, void* controller)
 {
-    TR_UNUSED(handle);
-
     NSDictionary* dict = [[NSDictionary alloc] initWithObjects:@[ @(active), @(byUser) ] forKeys:@[ @"Active", @"ByUser" ]];
     [(__bridge Controller*)controller performSelectorOnMainThread:@selector(altSpeedToggledCallbackIsLimited:) withObject:dict
                                                     waitUntilDone:NO];
 }
 
-static tr_rpc_callback_status rpcCallback(tr_session* handle, tr_rpc_callback_type type, struct tr_torrent* torrentStruct, void* controller)
+static tr_rpc_callback_status rpcCallback([[maybe_unused]] tr_session* handle, tr_rpc_callback_type type, struct tr_torrent* torrentStruct, void* controller)
 {
-    TR_UNUSED(handle);
-
     [(__bridge Controller*)controller rpcCallback:type forTorrentStruct:torrentStruct];
     return TR_RPC_NOREMOVE; //we'll do the remove manually
 }
@@ -448,9 +444,14 @@ static void removeKeRangerRansomware()
         tr_variantDictAddBool(&settings, TR_KEY_seed_queue_enabled, [fDefaults boolForKey:@"QueueSeed"]);
         tr_variantDictAddInt(&settings, TR_KEY_seed_queue_size, [fDefaults integerForKey:@"QueueSeedNumber"]);
         tr_variantDictAddBool(&settings, TR_KEY_start_added_torrents, [fDefaults boolForKey:@"AutoStartDownload"]);
-        tr_variantDictAddBool(&settings, TR_KEY_script_torrent_done_enabled, [fDefaults boolForKey:@"DoneScriptEnabled"]);
-        tr_variantDictAddStr(&settings, TR_KEY_script_torrent_done_filename, [fDefaults stringForKey:@"DoneScriptPath"].UTF8String);
         tr_variantDictAddBool(&settings, TR_KEY_utp_enabled, [fDefaults boolForKey:@"UTPGlobal"]);
+
+        tr_variantDictAddBool(&settings, TR_KEY_script_torrent_done_enabled, [fDefaults boolForKey:@"DoneScriptEnabled"]);
+        NSString* prefs_string = [fDefaults stringForKey:@"DoneScriptPath"];
+        if (prefs_string != nil)
+        {
+            tr_variantDictAddStr(&settings, TR_KEY_script_torrent_done_filename, prefs_string.UTF8String);
+        }
 
         // TODO: Add to GUI
         if ([fDefaults objectForKey:@"RPCHostWhitelist"])

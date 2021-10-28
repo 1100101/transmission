@@ -63,11 +63,13 @@
 #include "mime-types.h"
 #include "net.h"
 #include "platform.h" /* tr_lockLock() */
-#include "platform-quota.h" /* tr_device_info_create(), tr_device_info_get_free_space(), tr_device_info_free() */
+#include "platform-quota.h" /* tr_device_info_create(), tr_device_info_get_disk_space(), tr_device_info_free() */
 #include "tr-assert.h"
 #include "utils.h"
 #include "variant.h"
 #include "version.h"
+
+using namespace std::literals;
 
 time_t __tr_current_time = 0;
 
@@ -223,7 +225,7 @@ char const* tr_strip_positional_args(char const* str)
     char const* in = str;
     size_t pos = 0;
 
-    for (; str && *str && pos + 1 < buf.size(); ++str)
+    for (; str && *str && pos + 1 < std::size(buf); ++str)
     {
         buf[pos++] = *str;
 
@@ -281,14 +283,14 @@ void tr_timerAddMsec(struct event* timer, int msec)
 ***
 **/
 
+// TODO: return a std::vector<>
 uint8_t* tr_loadFile(char const* path, size_t* size, tr_error** error)
 {
-    tr_sys_path_info info;
-    tr_sys_file_t fd;
-    tr_error* my_error = nullptr;
     char const* const err_fmt = _("Couldn't read \"%1$s\": %2$s");
 
     /* try to stat the file */
+    auto info = tr_sys_path_info{};
+    tr_error* my_error = nullptr;
     if (!tr_sys_path_get_info(path, 0, &info, &my_error))
     {
         tr_logAddDebug(err_fmt, path, my_error->message);
@@ -310,8 +312,7 @@ uint8_t* tr_loadFile(char const* path, size_t* size, tr_error** error)
     }
 
     /* Load the torrent file into our buffer */
-    fd = tr_sys_file_open(path, TR_SYS_FILE_READ | TR_SYS_FILE_SEQUENTIAL, 0, &my_error);
-
+    tr_sys_file_t const fd = tr_sys_file_open(path, TR_SYS_FILE_READ | TR_SYS_FILE_SEQUENTIAL, 0, &my_error);
     if (fd == TR_BAD_SYS_FILE)
     {
         tr_logAddError(err_fmt, path, my_error->message);
@@ -320,7 +321,6 @@ uint8_t* tr_loadFile(char const* path, size_t* size, tr_error** error)
     }
 
     auto* buf = static_cast<uint8_t*>(tr_malloc(info.size + 1));
-
     if (!tr_sys_file_read(fd, buf, info.size, nullptr, &my_error))
     {
         tr_logAddError(err_fmt, path, my_error->message);
@@ -338,51 +338,42 @@ uint8_t* tr_loadFile(char const* path, size_t* size, tr_error** error)
 
 char* tr_buildPath(char const* first_element, ...)
 {
-    char const* element;
-    char* buf;
-    char* pch;
-    va_list vl;
-    size_t bufLen = 0;
 
     /* pass 1: allocate enough space for the string */
+    va_list vl;
     va_start(vl, first_element);
-    element = first_element;
-
-    while (element != nullptr)
+    auto bufLen = size_t{};
+    for (char const* element = first_element; element != nullptr;)
     {
         bufLen += strlen(element) + 1;
         element = va_arg(vl, char const*);
     }
-
-    pch = buf = tr_new(char, bufLen);
     va_end(vl);
-
+    char* const buf = tr_new(char, bufLen);
     if (buf == nullptr)
     {
         return nullptr;
     }
 
     /* pass 2: build the string piece by piece */
+    char* pch = buf;
     va_start(vl, first_element);
-    element = first_element;
-
-    while (element != nullptr)
+    for (char const* element = first_element; element != nullptr;)
     {
         size_t const elementLen = strlen(element);
-        memcpy(pch, element, elementLen);
-        pch += elementLen;
+        pch = std::copy_n(element, elementLen, pch);
         *pch++ = TR_PATH_DELIMITER;
         element = va_arg(vl, char const*);
     }
-
     va_end(vl);
 
-    /* terminate the string. if nonempty, eat the unwanted trailing slash */
+    // if nonempty, eat the unwanted trailing slash
     if (pch != buf)
     {
         --pch;
     }
 
+    // zero-terminate the string
     *pch++ = '\0';
 
     /* sanity checks & return */
@@ -390,24 +381,18 @@ char* tr_buildPath(char const* first_element, ...)
     return buf;
 }
 
-int64_t tr_getDirFreeSpace(char const* dir)
+tr_disk_space tr_getDirSpace(char const* dir)
 {
-    int64_t free_space;
-
     if (tr_str_is_empty(dir))
     {
         errno = EINVAL;
-        free_space = -1;
-    }
-    else
-    {
-        struct tr_device_info* info;
-        info = tr_device_info_create(dir);
-        free_space = tr_device_info_get_free_space(info);
-        tr_device_info_free(info);
+        return { -1, -1 };
     }
 
-    return free_space;
+    auto* const info = tr_device_info_create(dir);
+    auto const disk_space = tr_device_info_get_disk_space(info);
+    tr_device_info_free(info);
+    return disk_space;
 }
 
 /****
@@ -519,12 +504,9 @@ char const* tr_strcasestr(char const* haystack, char const* needle)
 char* tr_strdup_printf(char const* fmt, ...)
 {
     va_list ap;
-    char* ret;
-
     va_start(ap, fmt);
-    ret = tr_strdup_vprintf(fmt, ap);
+    char* const ret = tr_strdup_vprintf(fmt, ap);
     va_end(ap);
-
     return ret;
 }
 
@@ -637,9 +619,6 @@ char* tr_strstrip(char* str)
 
 bool tr_str_has_suffix(char const* str, char const* suffix)
 {
-    size_t str_len;
-    size_t suffix_len;
-
     if (str == nullptr)
     {
         return false;
@@ -650,8 +629,8 @@ bool tr_str_has_suffix(char const* str, char const* suffix)
         return true;
     }
 
-    str_len = strlen(str);
-    suffix_len = strlen(suffix);
+    auto const str_len = strlen(str);
+    auto const suffix_len = strlen(suffix);
 
     if (str_len < suffix_len)
     {
@@ -762,22 +741,17 @@ size_t tr_strlcpy(void* vdst, void const* vsrc, size_t siz)
 
 double tr_getRatio(uint64_t numerator, uint64_t denominator)
 {
-    double ratio;
-
     if (denominator > 0)
     {
-        ratio = numerator / (double)denominator;
-    }
-    else if (numerator > 0)
-    {
-        ratio = TR_RATIO_INF;
-    }
-    else
-    {
-        ratio = TR_RATIO_NA;
+        return numerator / (double)denominator;
     }
 
-    return ratio;
+    if (numerator > 0)
+    {
+        return TR_RATIO_INF;
+    }
+
+    return TR_RATIO_NA;
 }
 
 void tr_binary_to_hex(void const* vinput, void* voutput, size_t byte_length)
@@ -885,9 +859,8 @@ bool tr_addressIsIP(char const* str)
 
 static int parse_port(char const* port, size_t port_len)
 {
-    char* tmp = tr_strndup(port, port_len);
-    char* end;
-
+    char* const tmp = tr_strndup(port, port_len);
+    char* end = nullptr;
     long port_num = strtol(tmp, &end, 10);
 
     if (*end != '\0' || port_num <= 0 || port_num >= 65536)
@@ -1070,9 +1043,9 @@ int tr_lowerBound(
 
 static char* strip_non_utf8(char const* in, size_t inlen)
 {
-    char const* end;
-    struct evbuffer* buf = evbuffer_new();
+    evbuffer* const buf = evbuffer_new();
 
+    char const* end = nullptr;
     while (!tr_utf8_validate(in, inlen, &end))
     {
         int const good_len = end - in;
@@ -1111,7 +1084,7 @@ static char* to_utf8(char const* in, size_t inlen)
 
         iconv_t cd = iconv_open("UTF-8", test_encoding);
 
-        if (cd != (iconv_t)-1)
+        if (cd != (iconv_t)-1) // NOLINT(performance-no-int-to-ptr)
         {
             if (iconv(cd, &inbuf, &inbytesleft, &outbuf, &outbytesleft) != (size_t)-1)
             {
@@ -1134,26 +1107,11 @@ static char* to_utf8(char const* in, size_t inlen)
     return ret;
 }
 
-char* tr_utf8clean(char const* str, size_t max_len)
+char* tr_utf8clean(std::string_view str)
 {
-    char* ret;
-    char const* end;
-
-    if (max_len == TR_BAD_SIZE)
-    {
-        max_len = strlen(str);
-    }
-
-    if (tr_utf8_validate(str, max_len, &end))
-    {
-        ret = tr_strndup(str, max_len);
-    }
-    else
-    {
-        ret = to_utf8(str, max_len);
-    }
-
-    TR_ASSERT(tr_utf8_validate(ret, TR_BAD_SIZE, nullptr));
+    char* const ret = tr_utf8_validate(std::data(str), std::size(str), nullptr) ? tr_strndup(std::data(str), std::size(str)) :
+                                                                                  to_utf8(std::data(str), std::size(str));
+    TR_ASSERT(tr_utf8_validate(ret, strlen(ret), nullptr));
     return ret;
 }
 
@@ -1374,27 +1332,30 @@ struct number_range
  * This should be a single number (ex. "6") or a range (ex. "6-9").
  * Anything else is an error and will return failure.
  */
-static bool parseNumberSection(char const* str, char const* const end, number_range& range)
+static bool parseNumberSection(std::string_view str, number_range& range)
 {
-    bool success;
     auto const error = errno;
+    auto success = bool{};
 
 #if defined(HAVE_CHARCONV)
-    auto result = std::from_chars(str, end, range.low);
+    // wants char*, so string_view::iterator don't work. make our own begin/end
+    auto const* const begin_ch = std::data(str);
+    auto const* const end_ch = begin_ch + std::size(str);
+    auto result = std::from_chars(begin_ch, end_ch, range.low);
     success = result.ec == std::errc{};
     if (success)
     {
         range.high = range.low;
-        if (result.ptr != end && *result.ptr == '-')
+        if (result.ptr < end_ch && *result.ptr == '-')
         {
-            result = std::from_chars(result.ptr + 1, end, range.high);
+            result = std::from_chars(result.ptr + 1, end_ch, range.high);
             success = result.ec == std::errc{};
         }
     }
 #else
     try
     {
-        auto tmp = std::string(str, end);
+        auto tmp = std::string(str);
         auto pos = size_t{};
         range.low = range.high = std::stoi(tmp, &pos);
         if (pos != std::size(tmp) && tmp[pos] == '-')
@@ -1419,28 +1380,29 @@ static bool parseNumberSection(char const* str, char const* const end, number_ra
  * array of setmeCount ints of all the values in the array.
  * For example, "5-8" will return [ 5, 6, 7, 8 ] and setmeCount will be 4.
  * It's the caller's responsibility to call tr_free () on the returned array.
- * If a fragment of the string can't be parsed, NULL is returned.
+ * If a fragment of the string can't be parsed, nullptr is returned.
  */
-std::vector<int> tr_parseNumberRange(char const* str, size_t len) // TODO: string_view
+std::vector<int> tr_parseNumberRange(std::string_view str)
 {
     auto values = std::set<int>{};
 
-    auto const* const end = str + (len != TR_BAD_SIZE ? len : strlen(str));
-    for (auto const* walk = str; walk < end;)
+    for (;;)
     {
-        auto delim = std::find(walk, end, ',');
+        auto const delim = str.find(',');
         auto range = number_range{};
-        if (!parseNumberSection(walk, delim, range))
+        if (!parseNumberSection(str.substr(0, delim), range))
         {
             break;
         }
-
         for (auto i = range.low; i <= range.high; ++i)
         {
             values.insert(i);
         }
-
-        walk = delim + 1;
+        if (delim == std::string_view::npos)
+        {
+            break;
+        }
+        str.remove_prefix(delim + 1);
     }
 
     return { std::begin(values), std::end(values) };
@@ -1452,11 +1414,11 @@ std::vector<int> tr_parseNumberRange(char const* str, size_t len) // TODO: strin
 
 double tr_truncd(double x, int precision)
 {
-    char* pt;
     char buf[128];
     tr_snprintf(buf, sizeof(buf), "%.*f", TR_ARG_TUPLE(DBL_DIG, x));
 
-    if ((pt = strstr(buf, localeconv()->decimal_point)) != nullptr)
+    char* const pt = strstr(buf, localeconv()->decimal_point);
+    if (pt != nullptr)
     {
         pt[precision != 0 ? precision + 1 : 0] = '\0';
     }
@@ -1617,13 +1579,16 @@ uint64_t tr_ntohll(uint64_t x)
 struct formatter_unit
 {
     char* name;
-    size_t value;
+    uint64_t value;
 };
 
+using formatter_units = std::array<formatter_unit, 4>;
+/*
 struct formatter_units
 {
     struct formatter_unit units[4];
 };
+*/
 
 enum
 {
@@ -1634,59 +1599,55 @@ enum
 };
 
 static void formatter_init(
-    struct formatter_units* units,
-    size_t kilo,
+    formatter_units& units,
+    uint64_t kilo,
     char const* kb,
     char const* mb,
     char const* gb,
     char const* tb)
 {
-    size_t value;
-
-    value = kilo;
-    units->units[TR_FMT_KB].name = tr_strdup(kb);
-    units->units[TR_FMT_KB].value = value;
+    uint64_t value = kilo;
+    units[TR_FMT_KB].name = tr_strdup(kb);
+    units[TR_FMT_KB].value = value;
 
     value *= kilo;
-    units->units[TR_FMT_MB].name = tr_strdup(mb);
-    units->units[TR_FMT_MB].value = value;
+    units[TR_FMT_MB].name = tr_strdup(mb);
+    units[TR_FMT_MB].value = value;
 
     value *= kilo;
-    units->units[TR_FMT_GB].name = tr_strdup(gb);
-    units->units[TR_FMT_GB].value = value;
+    units[TR_FMT_GB].name = tr_strdup(gb);
+    units[TR_FMT_GB].value = value;
 
     value *= kilo;
-    units->units[TR_FMT_TB].name = tr_strdup(tb);
-    units->units[TR_FMT_TB].value = value;
+    units[TR_FMT_TB].name = tr_strdup(tb);
+    units[TR_FMT_TB].value = value;
 }
 
-static char* formatter_get_size_str(struct formatter_units const* u, char* buf, size_t bytes, size_t buflen)
+static char* formatter_get_size_str(formatter_units const& u, char* buf, uint64_t bytes, size_t buflen)
 {
-    int precision;
-    double value;
-    char const* units;
-    struct formatter_unit const* unit;
+    formatter_unit const* unit = nullptr;
 
-    if (bytes < u->units[1].value)
+    if (bytes < u[1].value)
     {
-        unit = &u->units[0];
+        unit = &u[0];
     }
-    else if (bytes < u->units[2].value)
+    else if (bytes < u[2].value)
     {
-        unit = &u->units[1];
+        unit = &u[1];
     }
-    else if (bytes < u->units[3].value)
+    else if (bytes < u[3].value)
     {
-        unit = &u->units[2];
+        unit = &u[2];
     }
     else
     {
-        unit = &u->units[3];
+        unit = &u[3];
     }
 
-    value = (double)bytes / unit->value;
-    units = unit->name;
+    double value = (double)bytes / unit->value;
+    char const* units = unit->name;
 
+    auto precision = int{};
     if (unit->value == 1)
     {
         precision = 0;
@@ -1704,36 +1665,36 @@ static char* formatter_get_size_str(struct formatter_units const* u, char* buf, 
     return buf;
 }
 
-static struct formatter_units size_units;
+static formatter_units size_units;
 
-void tr_formatter_size_init(size_t kilo, char const* kb, char const* mb, char const* gb, char const* tb)
+void tr_formatter_size_init(uint64_t kilo, char const* kb, char const* mb, char const* gb, char const* tb)
 {
-    formatter_init(&size_units, kilo, kb, mb, gb, tb);
+    formatter_init(size_units, kilo, kb, mb, gb, tb);
 }
 
-char* tr_formatter_size_B(char* buf, size_t bytes, size_t buflen)
+char* tr_formatter_size_B(char* buf, uint64_t bytes, size_t buflen)
 {
-    return formatter_get_size_str(&size_units, buf, bytes, buflen);
+    return formatter_get_size_str(size_units, buf, bytes, buflen);
 }
 
-static struct formatter_units speed_units;
+static formatter_units speed_units;
 
 size_t tr_speed_K = 0;
 
 void tr_formatter_speed_init(size_t kilo, char const* kb, char const* mb, char const* gb, char const* tb)
 {
     tr_speed_K = kilo;
-    formatter_init(&speed_units, kilo, kb, mb, gb, tb);
+    formatter_init(speed_units, kilo, kb, mb, gb, tb);
 }
 
 char* tr_formatter_speed_KBps(char* buf, double KBps, size_t buflen)
 {
-    double const K = speed_units.units[TR_FMT_KB].value;
+    double const K = speed_units[TR_FMT_KB].value;
     double speed = KBps;
 
     if (speed <= 999.95) /* 0.0 KB to 999.9 KB */
     {
-        tr_snprintf(buf, buflen, "%d %s", (int)speed, speed_units.units[TR_FMT_KB].name);
+        tr_snprintf(buf, buflen, "%d %s", (int)speed, speed_units[TR_FMT_KB].name);
     }
     else
     {
@@ -1741,65 +1702,61 @@ char* tr_formatter_speed_KBps(char* buf, double KBps, size_t buflen)
 
         if (speed <= 99.995) /* 0.98 MB to 99.99 MB */
         {
-            tr_snprintf(buf, buflen, "%.2f %s", speed, speed_units.units[TR_FMT_MB].name);
+            tr_snprintf(buf, buflen, "%.2f %s", speed, speed_units[TR_FMT_MB].name);
         }
         else if (speed <= 999.95) /* 100.0 MB to 999.9 MB */
         {
-            tr_snprintf(buf, buflen, "%.1f %s", speed, speed_units.units[TR_FMT_MB].name);
+            tr_snprintf(buf, buflen, "%.1f %s", speed, speed_units[TR_FMT_MB].name);
         }
         else
         {
-            tr_snprintf(buf, buflen, "%.1f %s", speed / K, speed_units.units[TR_FMT_GB].name);
+            tr_snprintf(buf, buflen, "%.1f %s", speed / K, speed_units[TR_FMT_GB].name);
         }
     }
 
     return buf;
 }
 
-static struct formatter_units mem_units;
+static formatter_units mem_units;
 
 size_t tr_mem_K = 0;
 
 void tr_formatter_mem_init(size_t kilo, char const* kb, char const* mb, char const* gb, char const* tb)
 {
     tr_mem_K = kilo;
-    formatter_init(&mem_units, kilo, kb, mb, gb, tb);
+    formatter_init(mem_units, kilo, kb, mb, gb, tb);
 }
 
 char* tr_formatter_mem_B(char* buf, size_t bytes_per_second, size_t buflen)
 {
-    return formatter_get_size_str(&mem_units, buf, bytes_per_second, buflen);
+    return formatter_get_size_str(mem_units, buf, bytes_per_second, buflen);
 }
 
 void tr_formatter_get_units(void* vdict)
 {
-    tr_variant* l;
     auto* dict = static_cast<tr_variant*>(vdict);
 
     tr_variantDictReserve(dict, 6);
 
-    tr_variantDictAddInt(dict, TR_KEY_memory_bytes, mem_units.units[TR_FMT_KB].value);
-    l = tr_variantDictAddList(dict, TR_KEY_memory_units, 4);
-
-    for (int i = 0; i < 4; i++)
+    tr_variantDictAddInt(dict, TR_KEY_memory_bytes, mem_units[TR_FMT_KB].value);
+    tr_variant* l = tr_variantDictAddList(dict, TR_KEY_memory_units, std::size(mem_units));
+    for (auto const& unit : mem_units)
     {
-        tr_variantListAddStr(l, mem_units.units[i].name);
+        tr_variantListAddStr(l, unit.name);
     }
 
-    tr_variantDictAddInt(dict, TR_KEY_size_bytes, size_units.units[TR_FMT_KB].value);
-    l = tr_variantDictAddList(dict, TR_KEY_size_units, 4);
-
-    for (int i = 0; i < 4; i++)
+    tr_variantDictAddInt(dict, TR_KEY_size_bytes, size_units[TR_FMT_KB].value);
+    l = tr_variantDictAddList(dict, TR_KEY_size_units, std::size(size_units));
+    for (auto const& unit : size_units)
     {
-        tr_variantListAddStr(l, size_units.units[i].name);
+        tr_variantListAddStr(l, unit.name);
     }
 
-    tr_variantDictAddInt(dict, TR_KEY_speed_bytes, speed_units.units[TR_FMT_KB].value);
-    l = tr_variantDictAddList(dict, TR_KEY_speed_units, 4);
-
-    for (int i = 0; i < 4; i++)
+    tr_variantDictAddInt(dict, TR_KEY_speed_bytes, speed_units[TR_FMT_KB].value);
+    l = tr_variantDictAddList(dict, TR_KEY_speed_units, std::size(speed_units));
+    for (auto const& unit : speed_units)
     {
-        tr_variantListAddStr(l, speed_units.units[i].name);
+        tr_variantListAddStr(l, unit.name);
     }
 }
 
@@ -1915,7 +1872,7 @@ void tr_net_init(void)
 
 /// mime-type
 
-char const* tr_get_mime_type_for_filename(std::string_view filename)
+std::string_view tr_get_mime_type_for_filename(std::string_view filename)
 {
     auto constexpr compare = [](mime_type_suffix const& entry, auto const& suffix)
     {
@@ -1938,9 +1895,13 @@ char const* tr_get_mime_type_for_filename(std::string_view filename)
         auto const it = std::lower_bound(std::begin(mime_type_suffixes), std::end(mime_type_suffixes), suffix_lc, compare);
         if (it != std::end(mime_type_suffixes) && suffix_lc == it->suffix)
         {
-            return std::data(it->mime_type);
+            return it->mime_type;
         }
     }
 
-    return nullptr;
+    // https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types
+    // application/octet-stream is the default value.
+    // An unknown file type should use this type.
+    auto constexpr Fallback = "application/octet-stream"sv;
+    return Fallback;
 }

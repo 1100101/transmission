@@ -6,10 +6,10 @@
  *
  */
 
-#include <errno.h>
-#include <string.h>
+#include <cerrno>
+#include <cstring>
 
-#include <signal.h>
+#include <csignal>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -33,7 +33,7 @@
 
 #ifdef _WIN32
 
-typedef SOCKET tr_pipe_end_t;
+using tr_pipe_end_t = SOCKET;
 
 static int pgpipe(tr_pipe_end_t handles[2])
 {
@@ -120,8 +120,8 @@ static int piperead(tr_pipe_end_t s, void* buf, int len)
         case WSAECONNRESET:
             /* EOF on the pipe! (win32 socket based implementation) */
             ret = 0;
+            [[fallthrough]];
 
-        /* fall through */
         default:
             errno = werror;
             break;
@@ -139,7 +139,7 @@ static int piperead(tr_pipe_end_t s, void* buf, int len)
 #define pipewrite(a, b, c) send(a, (char*)b, c, 0)
 
 #else
-typedef int tr_pipe_end_t;
+using tr_pipe_end_t = int;
 #define piperead(a, b, c) read(a, b, c)
 #define pipewrite(a, b, c) write(a, b, c)
 #endif
@@ -148,7 +148,7 @@ typedef int tr_pipe_end_t;
 ****
 ***/
 
-typedef struct tr_event_handle
+struct tr_event_handle
 {
     bool die;
     tr_pipe_end_t fds[2];
@@ -157,7 +157,7 @@ typedef struct tr_event_handle
     tr_thread* thread;
     struct event_base* base;
     struct event* pipeEvent;
-} tr_event_handle;
+};
 
 struct tr_run_data
 {
@@ -176,7 +176,7 @@ static void readFromPipe(evutil_socket_t fd, short eventType, void* veh)
     /* read the command type */
     char ch = '\0';
 
-    int ret;
+    int ret = 0;
     do
     {
         ret = piperead(fd, &ch, 1);
@@ -269,11 +269,9 @@ static void libeventThreadFunc(void* veh)
 
 void tr_eventInit(tr_session* session)
 {
-    tr_event_handle* eh;
-
     session->events = nullptr;
 
-    eh = tr_new0(tr_event_handle, 1);
+    auto* const eh = tr_new0(tr_event_handle, 1);
     eh->lock = tr_lockNew();
 
     if (pipe(eh->fds) == -1)
@@ -336,22 +334,18 @@ void tr_runInEventThread(tr_session* session, void (*func)(void*), void* user_da
     }
     else
     {
-        tr_pipe_end_t fd;
-        char ch;
-        ev_ssize_t res_1;
-        ev_ssize_t res_2;
         tr_event_handle* e = session->events;
         struct tr_run_data data;
 
         tr_lockLock(e->lock);
 
-        fd = e->fds[1];
-        ch = 'r';
-        res_1 = pipewrite(fd, &ch, 1);
+        tr_pipe_end_t const fd = e->fds[1];
+        char ch = 'r';
+        ev_ssize_t const res_1 = pipewrite(fd, &ch, 1);
 
         data.func = func;
         data.user_data = user_data;
-        res_2 = pipewrite(fd, &data, sizeof(data));
+        ev_ssize_t const res_2 = pipewrite(fd, &data, sizeof(data));
 
         tr_lockUnlock(e->lock);
 
