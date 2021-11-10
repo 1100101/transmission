@@ -18,7 +18,7 @@
 #include <libtransmission/transmission.h>
 #include <libtransmission/tr-getopt.h>
 #include <libtransmission/utils.h>
-#include <libtransmission/web.h> /* tr_webGetResponseStr() */
+#include <libtransmission/web-utils.h> /* tr_webGetResponseStr() */
 #include <libtransmission/variant.h>
 #include <libtransmission/version.h>
 
@@ -271,7 +271,7 @@ static void doScrape(tr_info const* inf)
 
                         while (tr_variantDictChild(files, child_pos, &key, &val))
                         {
-                            if (memcmp(inf->hash, tr_quark_get_string(key, nullptr), SHA_DIGEST_LENGTH) == 0)
+                            if (memcmp(inf->hash, tr_quark_get_string(key), SHA_DIGEST_LENGTH) == 0)
                             {
                                 int64_t seeders;
                                 if (!tr_variantDictFindInt(val, TR_KEY_complete, &seeders))

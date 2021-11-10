@@ -415,31 +415,24 @@ char* evbuffer_free_to_str(struct evbuffer* buf, size_t* result_len)
     return ret;
 }
 
-char* tr_strdup(void const* in)
+char* tr_strvDup(std::string_view in)
 {
-    return tr_strndup(in, in != nullptr ? strlen(static_cast<char const*>(in)) : 0);
+    auto const n = std::size(in);
+    auto* const ret = tr_new(char, n + 1);
+    std::copy(std::begin(in), std::end(in), ret);
+    ret[n] = '\0';
+    return ret;
 }
 
-char* tr_strndup(void const* in, size_t len)
+char* tr_strndup(void const* vin, size_t len)
 {
-    char* out = nullptr;
+    auto const* const in = static_cast<char const*>(vin);
+    return in == nullptr ? nullptr : tr_strvDup({ in, len == TR_BAD_SIZE ? strlen(in) : len });
+}
 
-    if (len == TR_BAD_SIZE)
-    {
-        out = tr_strdup(in);
-    }
-    else if (in != nullptr)
-    {
-        out = static_cast<char*>(tr_malloc(len + 1));
-
-        if (out != nullptr)
-        {
-            memcpy(out, in, len);
-            out[len] = '\0';
-        }
-    }
-
-    return out;
+char* tr_strdup(void const* in)
+{
+    return tr_strndup(in, TR_BAD_SIZE);
 }
 
 char const* tr_memmem(char const* haystack, size_t haystacklen, char const* needle, size_t needlelen)
@@ -553,66 +546,18 @@ int tr_strcmp0(char const* str1, char const* str2)
 *****
 ****/
 
-/* https://bugs.launchpad.net/percona-patches/+bug/526863/+attachment/1160199/+files/solaris_10_fix.patch */
-char* tr_strsep(char** str, char const* delims)
+std::string_view tr_strvStrip(std::string_view str)
 {
-#ifdef HAVE_STRSEP
-
-    return strsep(str, delims);
-
-#else
-
-    char* token;
-
-    if (*str == nullptr) /* no more tokens */
+    auto constexpr test = [](auto ch)
     {
-        return nullptr;
-    }
+        return isspace(ch);
+    };
 
-    token = *str;
+    auto const it = std::find_if_not(std::begin(str), std::end(str), test);
+    str.remove_prefix(std::distance(std::begin(str), it));
 
-    while (**str != '\0')
-    {
-        if (strchr(delims, **str) != nullptr)
-        {
-            **str = '\0';
-            (*str)++;
-            return token;
-        }
-
-        (*str)++;
-    }
-
-    /* there is not another token */
-    *str = nullptr;
-
-    return token;
-
-#endif
-}
-
-char* tr_strstrip(char* str)
-{
-    if (str != nullptr)
-    {
-        size_t len = strlen(str);
-
-        while (len != 0 && isspace(str[len - 1]))
-        {
-            --len;
-        }
-
-        size_t pos = 0;
-
-        while (pos < len && isspace(str[pos]))
-        {
-            ++pos;
-        }
-
-        len -= pos;
-        memmove(str, str + pos, len);
-        str[len] = '\0';
-    }
+    auto const rit = std::find_if_not(std::rbegin(str), std::rend(str), test);
+    str.remove_suffix(std::distance(std::rbegin(str), rit));
 
     return str;
 }
@@ -754,237 +699,6 @@ double tr_getRatio(uint64_t numerator, uint64_t denominator)
     return TR_RATIO_NA;
 }
 
-void tr_binary_to_hex(void const* vinput, void* voutput, size_t byte_length)
-{
-    static char const hex[] = "0123456789abcdef";
-
-    auto const* input = static_cast<uint8_t const*>(vinput);
-    auto* output = static_cast<char*>(voutput);
-
-    /* go from back to front to allow for in-place conversion */
-    input += byte_length;
-    output += byte_length * 2;
-
-    *output = '\0';
-
-    while (byte_length-- > 0)
-    {
-        unsigned int const val = *(--input);
-        *(--output) = hex[val & 0xf];
-        *(--output) = hex[val >> 4];
-    }
-}
-
-void tr_hex_to_binary(void const* vinput, void* voutput, size_t byte_length)
-{
-    static char const hex[] = "0123456789abcdef";
-
-    auto const* input = static_cast<uint8_t const*>(vinput);
-    auto* output = static_cast<uint8_t*>(voutput);
-
-    for (size_t i = 0; i < byte_length; ++i)
-    {
-        int const hi = strchr(hex, tolower(*input++)) - hex;
-        int const lo = strchr(hex, tolower(*input++)) - hex;
-        *output++ = (uint8_t)((hi << 4) | lo);
-    }
-}
-
-/***
-****
-***/
-
-static bool isValidURLChars(char const* url, size_t url_len)
-{
-    static char const rfc2396_valid_chars
-        [] = "abcdefghijklmnopqrstuvwxyz" /* lowalpha */
-             "ABCDEFGHIJKLMNOPQRSTUVWXYZ" /* upalpha */
-             "0123456789" /* digit */
-             "-_.!~*'()" /* mark */
-             ";/?:@&=+$," /* reserved */
-             "<>#%<\"" /* delims */
-             "{}|\\^[]`"; /* unwise */
-
-    if (url == nullptr)
-    {
-        return false;
-    }
-
-    for (char const *c = url, *end = url + url_len; c < end && *c != '\0'; ++c)
-    {
-        if (memchr(rfc2396_valid_chars, *c, sizeof(rfc2396_valid_chars) - 1) == nullptr)
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool tr_urlIsValidTracker(char const* url)
-{
-    if (url == nullptr)
-    {
-        return false;
-    }
-
-    size_t const url_len = strlen(url);
-
-    return isValidURLChars(url, url_len) && tr_urlParse(url, url_len, nullptr, nullptr, nullptr, nullptr) &&
-        (memcmp(url, "http://", 7) == 0 || memcmp(url, "https://", 8) == 0 || memcmp(url, "udp://", 6) == 0);
-}
-
-bool tr_urlIsValid(char const* url, size_t url_len)
-{
-    if (url == nullptr)
-    {
-        return false;
-    }
-
-    if (url_len == TR_BAD_SIZE)
-    {
-        url_len = strlen(url);
-    }
-
-    return isValidURLChars(url, url_len) && tr_urlParse(url, url_len, nullptr, nullptr, nullptr, nullptr) &&
-        (memcmp(url, "http://", 7) == 0 || memcmp(url, "https://", 8) == 0 || memcmp(url, "ftp://", 6) == 0 ||
-         memcmp(url, "sftp://", 7) == 0);
-}
-
-bool tr_addressIsIP(char const* str)
-{
-    tr_address tmp;
-    return tr_address_from_string(&tmp, str);
-}
-
-static int parse_port(char const* port, size_t port_len)
-{
-    char* const tmp = tr_strndup(port, port_len);
-    char* end = nullptr;
-    long port_num = strtol(tmp, &end, 10);
-
-    if (*end != '\0' || port_num <= 0 || port_num >= 65536)
-    {
-        port_num = -1;
-    }
-
-    tr_free(tmp);
-
-    return (int)port_num;
-}
-
-static int get_port_for_scheme(char const* scheme, size_t scheme_len)
-{
-    struct known_scheme
-    {
-        char const* name;
-        int port;
-    };
-
-    static struct known_scheme const known_schemes[] = {
-        { "udp", 80 }, //
-        { "ftp", 21 }, //
-        { "sftp", 22 }, //
-        { "http", 80 }, //
-        { "https", 443 }, //
-        { nullptr, 0 }, //
-    };
-
-    for (struct known_scheme const* s = known_schemes; s->name != nullptr; ++s)
-    {
-        if (scheme_len == strlen(s->name) && memcmp(scheme, s->name, scheme_len) == 0)
-        {
-            return s->port;
-        }
-    }
-
-    return -1;
-}
-
-bool tr_urlParse(char const* url, size_t url_len, char** setme_scheme, char** setme_host, int* setme_port, char** setme_path)
-{
-    if (url_len == TR_BAD_SIZE)
-    {
-        url_len = strlen(url);
-    }
-
-    char const* scheme = url;
-    char const* scheme_end = tr_memmem(scheme, url_len, "://", 3);
-
-    if (scheme_end == nullptr)
-    {
-        return false;
-    }
-
-    size_t const scheme_len = scheme_end - scheme;
-
-    if (scheme_len == 0)
-    {
-        return false;
-    }
-
-    url += scheme_len + 3;
-    url_len -= scheme_len + 3;
-
-    char const* authority = url;
-    auto const* authority_end = static_cast<char const*>(memchr(authority, '/', url_len));
-
-    if (authority_end == nullptr)
-    {
-        authority_end = authority + url_len;
-    }
-
-    size_t const authority_len = authority_end - authority;
-
-    if (authority_len == 0)
-    {
-        return false;
-    }
-
-    url += authority_len;
-    url_len -= authority_len;
-
-    auto const* host_end = static_cast<char const*>(memchr(authority, ':', authority_len));
-
-    size_t const host_len = host_end != nullptr ? (size_t)(host_end - authority) : authority_len;
-
-    if (host_len == 0)
-    {
-        return false;
-    }
-
-    size_t const port_len = host_end != nullptr ? authority_end - host_end - 1 : 0;
-
-    if (setme_scheme != nullptr)
-    {
-        *setme_scheme = tr_strndup(scheme, scheme_len);
-    }
-
-    if (setme_host != nullptr)
-    {
-        *setme_host = tr_strndup(authority, host_len);
-    }
-
-    if (setme_port != nullptr)
-    {
-        *setme_port = port_len > 0 ? parse_port(host_end + 1, port_len) : get_port_for_scheme(scheme, scheme_len);
-    }
-
-    if (setme_path != nullptr)
-    {
-        if (url[0] == '\0')
-        {
-            *setme_path = tr_strdup("/");
-        }
-        else
-        {
-            *setme_path = tr_strndup(url, url_len);
-        }
-    }
-
-    return true;
-}
-
 /***
 ****
 ***/
@@ -997,44 +711,6 @@ void tr_removeElementFromArray(void* array, size_t index_to_remove, size_t sizeo
         a + sizeof_element * index_to_remove,
         a + sizeof_element * (index_to_remove + 1),
         sizeof_element * (--nmemb - index_to_remove));
-}
-
-int tr_lowerBound(
-    void const* key,
-    void const* base,
-    size_t nmemb,
-    size_t size,
-    tr_voidptr_compare_func compar,
-    bool* exact_match)
-{
-    size_t first = 0;
-    auto const* cbase = static_cast<char const*>(base);
-    bool exact = false;
-
-    while (nmemb != 0)
-    {
-        size_t const half = nmemb / 2;
-        size_t const middle = first + half;
-        int const c = (*compar)(key, cbase + size * middle);
-
-        if (c <= 0)
-        {
-            if (c == 0)
-            {
-                exact = true;
-            }
-
-            nmemb = half;
-        }
-        else
-        {
-            first = middle + 1;
-            nmemb = nmemb - half - 1;
-        }
-    }
-
-    *exact_match = exact;
-    return first;
 }
 
 /***
@@ -1062,16 +738,19 @@ static char* strip_non_utf8(char const* in, size_t inlen)
 
 static char* to_utf8(char const* in, size_t inlen)
 {
-    char* ret = nullptr;
-
 #ifdef HAVE_ICONV
-
-    char const* encodings[] = { "CURRENT", "ISO-8859-15" };
     size_t const buflen = inlen * 4 + 10;
     char* out = tr_new(char, buflen);
 
-    for (size_t i = 0; ret == nullptr && i < TR_N_ELEMENTS(encodings); ++i)
+    auto constexpr Encodings = std::array<char const*, 2>{ "CURRENT", "ISO-8859-15" };
+    for (auto const* test_encoding : Encodings)
     {
+        iconv_t cd = iconv_open("UTF-8", test_encoding);
+        if (cd == (iconv_t)-1) // NOLINT(performance-no-int-to-ptr)
+        {
+            continue;
+        }
+
 #ifdef ICONV_SECOND_ARGUMENT_IS_CONST
         auto const* inbuf = in;
 #else
@@ -1080,18 +759,13 @@ static char* to_utf8(char const* in, size_t inlen)
         char* outbuf = out;
         size_t inbytesleft = inlen;
         size_t outbytesleft = buflen;
-        char const* test_encoding = encodings[i];
-
-        iconv_t cd = iconv_open("UTF-8", test_encoding);
-
-        if (cd != (iconv_t)-1) // NOLINT(performance-no-int-to-ptr)
+        auto const rv = iconv(cd, &inbuf, &inbytesleft, &outbuf, &outbytesleft);
+        iconv_close(cd);
+        if (rv != size_t(-1))
         {
-            if (iconv(cd, &inbuf, &inbytesleft, &outbuf, &outbytesleft) != (size_t)-1)
-            {
-                ret = tr_strndup(out, buflen - outbytesleft);
-            }
-
-            iconv_close(cd);
+            char* const ret = tr_strndup(out, buflen - outbytesleft);
+            tr_free(out);
+            return ret;
         }
     }
 
@@ -1099,12 +773,7 @@ static char* to_utf8(char const* in, size_t inlen)
 
 #endif
 
-    if (ret == nullptr)
-    {
-        ret = strip_non_utf8(in, inlen);
-    }
-
-    return ret;
+    return strip_non_utf8(in, inlen);
 }
 
 char* tr_utf8clean(std::string_view str)
@@ -1112,6 +781,24 @@ char* tr_utf8clean(std::string_view str)
     char* const ret = tr_utf8_validate(std::data(str), std::size(str), nullptr) ? tr_strndup(std::data(str), std::size(str)) :
                                                                                   to_utf8(std::data(str), std::size(str));
     TR_ASSERT(tr_utf8_validate(ret, strlen(ret), nullptr));
+    return ret;
+}
+
+static bool tr_strvUtf8Validate(std::string_view sv)
+{
+    return tr_utf8_validate(std::data(sv), std::size(sv), nullptr);
+}
+
+std::string tr_strvUtf8Clean(std::string_view sv)
+{
+    if (tr_strvUtf8Validate(sv))
+    {
+        return std::string{ sv };
+    }
+
+    auto* const tmp = to_utf8(std::data(sv), std::size(sv));
+    auto ret = std::string{ tmp ? tmp : "" };
+    tr_free(tmp);
     return ret;
 }
 
@@ -1385,24 +1072,14 @@ static bool parseNumberSection(std::string_view str, number_range& range)
 std::vector<int> tr_parseNumberRange(std::string_view str)
 {
     auto values = std::set<int>{};
-
-    for (;;)
+    auto token = std::string_view{};
+    auto range = number_range{};
+    while (tr_strvSep(&str, &token, ',') && parseNumberSection(token, range))
     {
-        auto const delim = str.find(',');
-        auto range = number_range{};
-        if (!parseNumberSection(str.substr(0, delim), range))
-        {
-            break;
-        }
         for (auto i = range.low; i <= range.high; ++i)
         {
             values.insert(i);
         }
-        if (delim == std::string_view::npos)
-        {
-            break;
-        }
-        str.remove_prefix(delim + 1);
     }
 
     return { std::begin(values), std::end(values) };

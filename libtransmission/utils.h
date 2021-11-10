@@ -8,11 +8,14 @@
 
 #pragma once
 
-#include <inttypes.h>
-#include <stdarg.h>
-#include <stddef.h> /* size_t */
+#include <cinttypes>
+#include <cstdarg>
+#include <cstddef>
+#include <ctime>
+#include <optional>
+#include <string>
 #include <string_view>
-#include <time.h> /* time_t */
+#include <type_traits>
 #include <vector>
 
 #include "tr-macros.h"
@@ -79,6 +82,19 @@ uint8_t* tr_loadFile(char const* filename, size_t* size, struct tr_error** error
 /** @brief build a filename from a series of elements using the
            platform's correct directory separator. */
 char* tr_buildPath(char const* first_element, ...) TR_GNUC_NULL_TERMINATED TR_GNUC_MALLOC;
+
+template<typename... T, typename std::enable_if_t<(std::is_convertible_v<T, std::string_view> && ...), bool> = true>
+std::string& tr_buildBuf(std::string& setme, T... args)
+{
+    setme.clear();
+    auto const n = (std::size(std::string_view{ args }) + ...);
+    if (setme.capacity() < n)
+    {
+        setme.reserve(n);
+    }
+    ((setme += args), ...);
+    return setme;
+}
 
 /**
  * @brief Get disk capacity and free disk space (in bytes) for the specified folder.
@@ -177,11 +193,12 @@ void tr_free_ptrv(void* const* p);
  */
 void* tr_memdup(void const* src, size_t byteCount);
 
-#define tr_new(struct_type, n_structs) ((struct_type*)tr_malloc(sizeof(struct_type) * (size_t)(n_structs)))
+#define tr_new(struct_type, n_structs) (static_cast<struct_type*>(tr_malloc(sizeof(struct_type) * (size_t)(n_structs))))
 
-#define tr_new0(struct_type, n_structs) ((struct_type*)tr_malloc0(sizeof(struct_type) * (size_t)(n_structs)))
+#define tr_new0(struct_type, n_structs) (static_cast<struct_type*>(tr_malloc0(sizeof(struct_type) * (size_t)(n_structs))))
 
-#define tr_renew(struct_type, mem, n_structs) ((struct_type*)tr_realloc((mem), sizeof(struct_type) * (size_t)(n_structs)))
+#define tr_renew(struct_type, mem, n_structs) \
+    (static_cast<struct_type*>(tr_realloc((mem), sizeof(struct_type) * (size_t)(n_structs))))
 
 /**
  * @brief make a newly-allocated copy of a substring
@@ -210,15 +227,6 @@ constexpr bool tr_str_is_empty(char const* value)
 
 char* evbuffer_free_to_str(struct evbuffer* buf, size_t* result_len);
 
-/** @brief similar to bsearch() but returns the index of the lower bound */
-int tr_lowerBound(
-    void const* key,
-    void const* base,
-    size_t nmemb,
-    size_t size,
-    tr_voidptr_compare_func compar,
-    bool* exact_match) TR_GNUC_HOT TR_GNUC_NONNULL(1, 5, 6);
-
 /**
  * @brief sprintf() a string into a newly-allocated buffer large enough to hold it
  * @return a newly-allocated string that can be freed with tr_free()
@@ -236,10 +244,6 @@ int tr_snprintf(void* buf, size_t buflen, char const* fmt, ...) TR_GNUC_PRINTF(3
     @param errnum the error number to describe */
 char const* tr_strerror(int errnum);
 
-/** @brief strips leading and trailing whitspace from a string
-    @return the stripped string */
-char* tr_strstrip(char* str);
-
 /** @brief Returns true if the string ends with the specified case-insensitive suffix */
 bool tr_str_has_suffix(char const* str, char const* suffix);
 
@@ -249,29 +253,58 @@ char const* tr_memmem(char const* haystack, size_t haystack_len, char const* nee
 /** @brief Portability wrapper for strcasestr() that uses the system implementation if available */
 char const* tr_strcasestr(char const* haystack, char const* needle);
 
-/** @brief Portability wrapper for strsep() that uses the system implementation if available */
-char* tr_strsep(char** str, char const* delim);
+/***
+****  std::string_view utils
+***/
+
+template<typename T>
+constexpr bool tr_strvContains(std::string_view sv, T key) // c++23
+{
+    return sv.find(key) != sv.npos;
+}
+
+constexpr bool tr_strvStartsWith(std::string_view sv, char key) // c++20
+{
+    return !std::empty(sv) && sv.front() == key;
+}
+
+constexpr bool tr_strvStartsWith(std::string_view sv, std::string_view key) // c++20
+{
+    return std::size(key) <= std::size(sv) && sv.substr(0, std::size(key)) == key;
+}
+
+constexpr bool tr_strvEndsWith(std::string_view sv, std::string_view key) // c++20
+{
+    return std::size(key) <= std::size(sv) && sv.substr(std::size(sv) - std::size(key)) == key;
+}
+
+constexpr bool tr_strvEndsWith(std::string_view sv, char key) // c++20
+{
+    return !std::empty(sv) && sv.back() == key;
+}
+
+constexpr std::string_view tr_strvSep(std::string_view* sv, char delim)
+{
+    auto pos = sv->find(delim);
+    auto const ret = sv->substr(0, pos);
+    sv->remove_prefix(pos != sv->npos ? pos + 1 : std::size(*sv));
+    return ret;
+}
+
+constexpr bool tr_strvSep(std::string_view* sv, std::string_view* token, char delim)
+{
+    return !std::empty((*token = tr_strvSep(sv, delim)));
+}
+
+std::string_view tr_strvStrip(std::string_view sv);
+
+char* tr_strvDup(std::string_view) TR_GNUC_MALLOC;
+
+std::string tr_strvUtf8Clean(std::string_view sv);
 
 /***
 ****
 ***/
-
-void tr_binary_to_hex(void const* input, void* output, size_t byte_length) TR_GNUC_NONNULL(1, 2);
-void tr_hex_to_binary(void const* input, void* output, size_t byte_length) TR_GNUC_NONNULL(1, 2);
-
-/** @brief convenience function to determine if an address is an IP address (IPv4 or IPv6) */
-bool tr_addressIsIP(char const* address);
-
-/** @brief return true if the url is a http or https or UDP url that Transmission understands */
-bool tr_urlIsValidTracker(char const* url);
-
-/** @brief return true if the url is a [ http, https, ftp, sftp ] url that Transmission understands */
-bool tr_urlIsValid(char const* url, size_t url_len);
-
-/** @brief parse a URL into its component parts
-    @return True on success or false if an error occurred */
-bool tr_urlParse(char const* url, size_t url_len, char** setme_scheme, char** setme_host, int* setme_port, char** setme_path)
-    TR_GNUC_NONNULL(1);
 
 /** @brief return TR_RATIO_NA, TR_RATIO_INF, or a number in [0..1]
     @return TR_RATIO_NA, TR_RATIO_INF, or a number in [0..1] */

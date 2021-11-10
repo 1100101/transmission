@@ -19,17 +19,16 @@
 #include <list>
 #include <map>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
-#include <event2/util.h> // evutil_ascii_strcasecmp()
+#include <event2/util.h> // evutil_ascii_strncasecmp()
 
 #include "bandwidth.h"
-#include "bitfield.h"
 #include "net.h"
 #include "tr-macros.h"
-#include "utils.h"
-#include "variant.h"
+#include "utils.h" // tr_speed_K
 
 enum tr_auto_switch_state_t
 {
@@ -43,14 +42,15 @@ tr_peer_id_t tr_peerIdInit();
 struct event_base;
 struct evdns_base;
 
+class tr_bitfield;
 struct tr_address;
 struct tr_announcer;
 struct tr_announcer_udp;
 struct tr_bindsockets;
 struct tr_blocklistFile;
 struct tr_cache;
-struct tr_fdInfo;
 struct tr_device_info;
+struct tr_fdInfo;
 
 struct tr_turtle_info
 {
@@ -101,11 +101,30 @@ struct CompareHash
     }
 };
 
-struct CompareHashString
+struct CaseInsensitiveStringCompare // case-insensitive string compare
 {
-    bool operator()(char const* const a, char const* const b) const
+    int compare(std::string_view a, std::string_view b) const // <=>
     {
-        return evutil_ascii_strcasecmp(a, b) < 0;
+        auto const alen = std::size(a);
+        auto const blen = std::size(b);
+
+        auto i = evutil_ascii_strncasecmp(std::data(a), std::data(b), std::min(alen, blen));
+        if (i != 0)
+        {
+            return i;
+        }
+
+        if (alen != blen)
+        {
+            return alen < blen ? -1 : 1;
+        }
+
+        return 0;
+    }
+
+    bool operator()(std::string_view a, std::string_view b) const // less than
+    {
+        return compare(a, b) < 0;
     }
 };
 
@@ -132,7 +151,8 @@ struct tr_session
 
     uint8_t peer_id_ttl_hours;
 
-    tr_variant removedTorrents;
+    // torrent id, time removed
+    std::vector<std::pair<int, time_t>> removed_torrents;
 
     bool stalledEnabled;
     bool queueEnabled[2];
@@ -193,7 +213,7 @@ struct tr_session
     std::unordered_set<tr_torrent*> torrents;
     std::map<int, tr_torrent*> torrentsById;
     std::map<uint8_t const*, tr_torrent*, CompareHash> torrentsByHash;
-    std::map<char const*, tr_torrent*, CompareHashString> torrentsByHashString;
+    std::map<std::string_view, tr_torrent*, CaseInsensitiveStringCompare> torrentsByHashString;
 
     std::array<std::string, TR_SCRIPT_N_TYPES> scripts;
 
@@ -226,8 +246,6 @@ struct tr_session
     struct tr_announcer* announcer;
     struct tr_announcer_udp* announcer_udp;
 
-    tr_variant* metainfoLookup;
-
     struct event* nowTimer;
     struct event* saveTimer;
 
@@ -252,10 +270,6 @@ constexpr tr_port tr_sessionGetPublicPeerPort(tr_session const* session)
 bool tr_sessionAllowsDHT(tr_session const* session);
 
 bool tr_sessionAllowsLPD(tr_session const* session);
-
-char const* tr_sessionFindTorrentFile(tr_session const* session, char const* hashString);
-
-void tr_sessionSetTorrentFile(tr_session* session, char const* hashString, char const* filename);
 
 bool tr_sessionIsAddressBlocked(tr_session const* session, struct tr_address const* addr);
 

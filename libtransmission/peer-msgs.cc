@@ -18,6 +18,7 @@
 #include <event2/event.h>
 
 #include "transmission.h"
+
 #include "cache.h"
 #include "completion.h"
 #include "file.h"
@@ -25,9 +26,10 @@
 #include "peer-io.h"
 #include "peer-mgr.h"
 #include "peer-msgs.h"
+#include "ptrarray.h"
 #include "session.h"
-#include "torrent.h"
 #include "torrent-magnet.h"
+#include "torrent.h"
 #include "tr-assert.h"
 #include "tr-dht.h"
 #include "utils.h"
@@ -672,7 +674,7 @@ static void myDebug(char const* file, int line, tr_peerMsgsImpl const* msgs, cha
             tr_logGetTimeStr(timestr, sizeof(timestr)),
             tr_torrentName(msgs->torrent),
             tr_peerIoGetAddrStr(msgs->io, addrstr, sizeof(addrstr)),
-            tr_quark_get_string(msgs->client, nullptr));
+            tr_quark_get_string(msgs->client));
         va_start(args, fmt);
         evbuffer_add_vprintf(buf, fmt, args);
         va_end(args);
@@ -1715,7 +1717,7 @@ static ReadState readBtMessage(tr_peerMsgsImpl* msgs, struct evbuffer* inbuf, si
             uint8_t* tmp = tr_new(uint8_t, msglen);
             dbgmsg(msgs, "got a bitfield");
             tr_peerIoReadBytes(msgs->io, inbuf, tmp, msglen);
-            msgs->have.setRaw(tmp, msglen, tr_torrentHasMetadata(msgs->torrent));
+            msgs->have.setRaw(tmp, msglen);
             msgs->publishClientGotBitfield(&msgs->have);
             updatePeerProgress(msgs);
             tr_free(tmp);
@@ -2216,10 +2218,9 @@ static size_t fillOutputBuffer(tr_peerMsgsImpl* msgs, time_t now)
             evbuffer_commit_space(out, iovec, 1);
 
             /* check the piece if it needs checking... */
-            if (!err && tr_torrentPieceNeedsCheck(msgs->torrent, req.index))
+            if (!err)
             {
-                err = !tr_torrentCheckPiece(msgs->torrent, req.index);
-
+                err = !msgs->torrent->ensurePieceIsChecked(req.index);
                 if (err)
                 {
                     tr_torrentSetLocalError(
