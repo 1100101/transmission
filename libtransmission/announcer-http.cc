@@ -218,7 +218,7 @@ static void on_announce_done(
     else
     {
         tr_variant benc;
-        bool const variant_loaded = tr_variantFromBenc(&benc, msg) == 0;
+        auto const variant_loaded = tr_variantFromBuf(&benc, TR_VARIANT_PARSE_BENC | TR_VARIANT_PARSE_INPLACE, msg);
 
         if (tr_env_key_exists("TR_CURL_VERBOSE"))
         {
@@ -390,7 +390,8 @@ static void on_scrape_done(
     else
     {
         auto top = tr_variant{};
-        auto const variant_loaded = tr_variantFromBenc(&top, msg) == 0;
+
+        auto const variant_loaded = tr_variantFromBuf(&top, TR_VARIANT_PARSE_BENC | TR_VARIANT_PARSE_INPLACE, msg);
 
         if (tr_env_key_exists("TR_CURL_VERBOSE"))
         {
@@ -416,8 +417,7 @@ static void on_scrape_done(
 
         if (variant_loaded)
         {
-            auto sv = std::string_view{};
-            if (tr_variantDictFindStrView(&top, TR_KEY_failure_reason, &sv))
+            if (auto sv = std::string_view{}; tr_variantDictFindStrView(&top, TR_KEY_failure_reason, &sv))
             {
                 response->errmsg = sv;
             }

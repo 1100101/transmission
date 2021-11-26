@@ -537,7 +537,7 @@ static void publishPeersPex(tr_tier* tier, int seeders, int leechers, tr_pex con
 
 struct AnnTrackerInfo
 {
-    AnnTrackerInfo(tr_tracker_info info_in, tr_url_parsed_t url_in)
+    AnnTrackerInfo(tr_tracker_info const& info_in, tr_url_parsed_t const& url_in)
         : info{ info_in }
         , url{ url_in }
     {
@@ -920,7 +920,7 @@ static tr_announce_request* announce_request_new(
     req->up = tier->byteCounts[TR_ANN_UP];
     req->down = tier->byteCounts[TR_ANN_DOWN];
     req->corrupt = tier->byteCounts[TR_ANN_CORRUPT];
-    req->leftUntilComplete = tr_torrentHasMetadata(tor) ? tor->info.totalSize - tr_torrentHaveTotal(tor) : INT64_MAX;
+    req->leftUntilComplete = tr_torrentHasMetadata(tor) ? tor->info.totalSize - tor->hasTotal() : INT64_MAX;
     req->event = event;
     req->numwant = event == TR_ANNOUNCE_EVENT_STOPPED ? 0 : Numwant;
     req->key = announcer->key;
@@ -1527,7 +1527,8 @@ static void multiscrape(tr_announcer* announcer, std::vector<tr_tier*> const& ti
                 continue;
             }
 
-            req->info_hash[req->info_hash_count++] = tr_torrentInfoHash(tier->tor);
+            req->info_hash[req->info_hash_count] = tr_torrentInfoHash(tier->tor);
+            ++req->info_hash_count;
             tier->isScraping = true;
             tier->lastScrapeStartTime = now;
             found = true;
@@ -1540,7 +1541,8 @@ static void multiscrape(tr_announcer* announcer, std::vector<tr_tier*> const& ti
             req->scrape_url = scrape_info->scrape_url;
             tier_build_log_name(tier, req->log_name, sizeof(req->log_name));
 
-            req->info_hash[req->info_hash_count++] = tr_torrentInfoHash(tier->tor);
+            req->info_hash[req->info_hash_count] = tr_torrentInfoHash(tier->tor);
+            ++req->info_hash_count;
             tier->isScraping = true;
             tier->lastScrapeStartTime = now;
         }
@@ -1683,10 +1685,10 @@ static void onUpkeepTimer(evutil_socket_t /*fd*/, short /*what*/, void* vannounc
 {
     auto* announcer = static_cast<tr_announcer*>(vannouncer);
     tr_session* session = announcer->session;
+    auto const lock = session->unique_lock();
+
     bool const is_closing = session->isClosed;
     time_t const now = tr_time();
-
-    tr_sessionLock(session);
 
     /* maybe send out some "stopped" messages for closed torrents */
     flushCloseMessages(announcer);
@@ -1706,8 +1708,6 @@ static void onUpkeepTimer(evutil_socket_t /*fd*/, short /*what*/, void* vannounc
 
     /* set up the next timer */
     tr_timerAddMsec(announcer->upkeepTimer, UpkeepIntervalMsec);
-
-    tr_sessionUnlock(session);
 }
 
 /***

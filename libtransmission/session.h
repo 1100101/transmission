@@ -17,6 +17,7 @@
 #include <array>
 #include <cstring> // memcmp()
 #include <list>
+#include <mutex>
 #include <map>
 #include <memory>
 #include <string>
@@ -135,6 +136,16 @@ struct CaseInsensitiveStringCompare // case-insensitive string compare
 struct tr_session
 {
 public:
+    auto unique_lock() const
+    {
+        return std::unique_lock(session_mutex_);
+    }
+
+    bool isClosing() const
+    {
+        return is_closing_;
+    }
+
     // download dir
 
     std::string const& downloadDir() const
@@ -261,7 +272,7 @@ public:
     bool isUTPEnabled;
     bool isLPDEnabled;
     bool isPrefetchEnabled;
-    bool isClosing;
+    bool is_closing_ = false;
     bool isClosed;
     bool isRatioLimited;
     bool isIdleLimited;
@@ -343,8 +354,6 @@ public:
 
     struct tr_cache* cache;
 
-    struct tr_lock* lock;
-
     struct tr_web* web;
 
     struct tr_session_id* session_id;
@@ -375,6 +384,8 @@ public:
     std::unique_ptr<tr_rpc_server> rpc_server_;
 
 private:
+    static std::recursive_mutex session_mutex_;
+
     std::array<std::string, TR_SCRIPT_N_TYPES> scripts_;
     std::string blocklist_url_;
     std::string download_dir_;
@@ -398,12 +409,6 @@ bool tr_sessionAllowsDHT(tr_session const* session);
 bool tr_sessionAllowsLPD(tr_session const* session);
 
 bool tr_sessionIsAddressBlocked(tr_session const* session, struct tr_address const* addr);
-
-void tr_sessionLock(tr_session*);
-
-void tr_sessionUnlock(tr_session*);
-
-bool tr_sessionIsLocked(tr_session const*);
 
 struct tr_address const* tr_sessionGetPublicAddress(tr_session const* session, int tr_af_type, bool* is_default_value);
 

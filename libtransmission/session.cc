@@ -46,7 +46,7 @@
 #include "peer-io.h"
 #include "peer-mgr.h"
 #include "platform-quota.h" /* tr_device_info_free() */
-#include "platform.h" /* tr_lock, tr_getTorrentDir() */
+#include "platform.h" /* tr_getTorrentDir() */
 #include "port-forwarding.h"
 #include "rpc-server.h"
 #include "session-id.h"
@@ -66,6 +66,8 @@
 #include "web.h"
 
 using namespace std::literals;
+
+std::recursive_mutex tr_session::session_mutex_;
 
 #ifdef TR_LIGHTWEIGHT
 static auto constexpr DefaultCacheSizeMB = int{ 2 };
@@ -324,7 +326,7 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
 
     tr_variantDictReserve(d, 69);
     tr_variantDictAddBool(d, TR_KEY_blocklist_enabled, false);
-    tr_variantDictAddStr(d, TR_KEY_blocklist_url, "http://www.example.com/blocklist"sv);
+    tr_variantDictAddStrView(d, TR_KEY_blocklist_url, "http://www.example.com/blocklist"sv);
     tr_variantDictAddInt(d, TR_KEY_cache_size_mb, DefaultCacheSizeMB);
     tr_variantDictAddBool(d, TR_KEY_dht_enabled, true);
     tr_variantDictAddBool(d, TR_KEY_utp_enabled, true);
@@ -346,7 +348,7 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
     tr_variantDictAddBool(d, TR_KEY_peer_port_random_on_start, false);
     tr_variantDictAddInt(d, TR_KEY_peer_port_random_low, 49152);
     tr_variantDictAddInt(d, TR_KEY_peer_port_random_high, 65535);
-    tr_variantDictAddStr(d, TR_KEY_peer_socket_tos, TR_DEFAULT_PEER_SOCKET_TOS_STR);
+    tr_variantDictAddStrView(d, TR_KEY_peer_socket_tos, TR_DEFAULT_PEER_SOCKET_TOS_STR);
     tr_variantDictAddBool(d, TR_KEY_pex_enabled, true);
     tr_variantDictAddBool(d, TR_KEY_port_forwarding_enabled, true);
     tr_variantDictAddInt(d, TR_KEY_preallocation, TR_PREALLOCATE_SPARSE);
@@ -358,20 +360,20 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
     tr_variantDictAddBool(d, TR_KEY_ratio_limit_enabled, false);
     tr_variantDictAddBool(d, TR_KEY_rename_partial_files, true);
     tr_variantDictAddBool(d, TR_KEY_rpc_authentication_required, false);
-    tr_variantDictAddStr(d, TR_KEY_rpc_bind_address, "0.0.0.0");
+    tr_variantDictAddStrView(d, TR_KEY_rpc_bind_address, "0.0.0.0");
     tr_variantDictAddBool(d, TR_KEY_rpc_enabled, false);
-    tr_variantDictAddStr(d, TR_KEY_rpc_password, "");
-    tr_variantDictAddStr(d, TR_KEY_rpc_username, "");
-    tr_variantDictAddStr(d, TR_KEY_rpc_whitelist, TR_DEFAULT_RPC_WHITELIST);
+    tr_variantDictAddStrView(d, TR_KEY_rpc_password, "");
+    tr_variantDictAddStrView(d, TR_KEY_rpc_username, "");
+    tr_variantDictAddStrView(d, TR_KEY_rpc_whitelist, TR_DEFAULT_RPC_WHITELIST);
     tr_variantDictAddBool(d, TR_KEY_rpc_whitelist_enabled, true);
-    tr_variantDictAddStr(d, TR_KEY_rpc_host_whitelist, TR_DEFAULT_RPC_HOST_WHITELIST);
+    tr_variantDictAddStrView(d, TR_KEY_rpc_host_whitelist, TR_DEFAULT_RPC_HOST_WHITELIST);
     tr_variantDictAddBool(d, TR_KEY_rpc_host_whitelist_enabled, true);
     tr_variantDictAddInt(d, TR_KEY_rpc_port, TR_DEFAULT_RPC_PORT);
-    tr_variantDictAddStr(d, TR_KEY_rpc_url, TR_DEFAULT_RPC_URL_STR);
+    tr_variantDictAddStrView(d, TR_KEY_rpc_url, TR_DEFAULT_RPC_URL_STR);
     tr_variantDictAddBool(d, TR_KEY_scrape_paused_torrents_enabled, true);
-    tr_variantDictAddStr(d, TR_KEY_script_torrent_added_filename, "");
+    tr_variantDictAddStrView(d, TR_KEY_script_torrent_added_filename, "");
     tr_variantDictAddBool(d, TR_KEY_script_torrent_added_enabled, false);
-    tr_variantDictAddStr(d, TR_KEY_script_torrent_done_filename, "");
+    tr_variantDictAddStrView(d, TR_KEY_script_torrent_done_filename, "");
     tr_variantDictAddBool(d, TR_KEY_script_torrent_done_enabled, false);
     tr_variantDictAddInt(d, TR_KEY_seed_queue_size, 10);
     tr_variantDictAddBool(d, TR_KEY_seed_queue_enabled, false);
@@ -386,8 +388,8 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
     tr_variantDictAddBool(d, TR_KEY_speed_limit_up_enabled, false);
     tr_variantDictAddInt(d, TR_KEY_umask, 022);
     tr_variantDictAddInt(d, TR_KEY_upload_slots_per_torrent, 14);
-    tr_variantDictAddStr(d, TR_KEY_bind_address_ipv4, TR_DEFAULT_BIND_ADDRESS_IPV4);
-    tr_variantDictAddStr(d, TR_KEY_bind_address_ipv6, TR_DEFAULT_BIND_ADDRESS_IPV6);
+    tr_variantDictAddStrView(d, TR_KEY_bind_address_ipv4, TR_DEFAULT_BIND_ADDRESS_IPV4);
+    tr_variantDictAddStrView(d, TR_KEY_bind_address_ipv6, TR_DEFAULT_BIND_ADDRESS_IPV6);
     tr_variantDictAddBool(d, TR_KEY_start_added_torrents, true);
     tr_variantDictAddBool(d, TR_KEY_trash_original_torrent_files, false);
     tr_variantDictAddInt(d, TR_KEY_anti_brute_force_threshold, 100);
@@ -491,8 +493,7 @@ bool tr_sessionLoadSettings(tr_variant* dict, char const* configDir, char const*
     auto fileSettings = tr_variant{};
     auto const filename = tr_strvPath(configDir, "settings.json"sv);
     auto success = bool{};
-    tr_error* error = nullptr;
-    if (tr_variantFromFile(&fileSettings, TR_VARIANT_FMT_JSON, filename.c_str(), &error))
+    if (tr_error* error = nullptr; tr_variantFromFile(&fileSettings, TR_VARIANT_PARSE_JSON, filename.c_str(), &error))
     {
         tr_variantMergeDicts(dict, &fileSettings);
         tr_variantFree(&fileSettings);
@@ -521,7 +522,7 @@ void tr_sessionSaveSettings(tr_session* session, char const* configDir, tr_varia
     {
         tr_variant fileSettings;
 
-        if (tr_variantFromFile(&fileSettings, TR_VARIANT_FMT_JSON, filename.c_str(), nullptr))
+        if (tr_variantFromFile(&fileSettings, TR_VARIANT_PARSE_JSON, filename.c_str(), nullptr))
         {
             tr_variantMergeDicts(&settings, &fileSettings);
             tr_variantFree(&fileSettings);
@@ -600,7 +601,6 @@ tr_session* tr_sessionInit(char const* configDir, bool messageQueuingEnabled, tr
     auto* session = new tr_session{};
     session->udp_socket = TR_BAD_SOCKET;
     session->udp6_socket = TR_BAD_SOCKET;
-    session->lock = tr_lockNew();
     session->cache = tr_cacheNew(1024 * 1024 * 2);
     session->magicNumber = SESSION_MAGIC_NUMBER;
     session->session_id = tr_session_id_new();
@@ -843,7 +843,7 @@ static void sessionSetImpl(void* vdata)
     }
 
     sv = ""sv;
-    tr_variantDictFindStrView(settings, TR_KEY_peer_congestion_algorithm, &sv);
+    (void)tr_variantDictFindStrView(settings, TR_KEY_peer_congestion_algorithm, &sv);
     session->setPeerCongestionAlgorithm(sv);
 
     if (tr_variantDictFindBool(settings, TR_KEY_blocklist_enabled, &boolVal))
@@ -1209,29 +1209,6 @@ bool tr_sessionIsIncompleteDirEnabled(tr_session const* session)
     TR_ASSERT(tr_isSession(session));
 
     return session->useIncompleteDir();
-}
-
-/***
-****
-***/
-
-void tr_sessionLock(tr_session* session)
-{
-    TR_ASSERT(tr_isSession(session));
-
-    tr_lockLock(session->lock);
-}
-
-void tr_sessionUnlock(tr_session* session)
-{
-    TR_ASSERT(tr_isSession(session));
-
-    tr_lockUnlock(session->lock);
-}
-
-bool tr_sessionIsLocked(tr_session const* session)
-{
-    return tr_isSession(session) && tr_lockHave(session->lock);
 }
 
 /***
@@ -1839,7 +1816,7 @@ static void sessionCloseImplWaitForIdleUdp(evutil_socket_t fd, short what, void*
 
 static void sessionCloseImplStart(tr_session* session)
 {
-    session->isClosing = true;
+    session->is_closing_ = true;
 
     free_incoming_peer_port(session);
 
@@ -2024,7 +2001,6 @@ void tr_sessionClose(tr_session* session)
     delete session->bandwidth;
     delete session->turtle.minutes;
     tr_session_id_free(session->session_id);
-    tr_lockFree(session->lock);
 
     tr_free(session->configDir);
     tr_free(session->resumeDir);
@@ -2338,9 +2314,7 @@ static void loadBlocklists(tr_session* session)
             continue;
         }
 
-        auto const path = tr_strvPath(dirname, name);
-
-        if (tr_strvEndsWith(path, ".bin"sv))
+        if (auto const path = tr_strvPath(dirname, name); tr_strvEndsWith(path, ".bin"sv))
         {
             load = path;
         }
@@ -2463,7 +2437,7 @@ bool tr_blocklistExists(tr_session const* session)
 
 int tr_blocklistSetContent(tr_session* session, char const* contentFilename)
 {
-    tr_sessionLock(session);
+    auto const lock = session->unique_lock();
 
     // find (or add) the default blocklist
     tr_blocklistFile* b = nullptr;
@@ -2486,7 +2460,6 @@ int tr_blocklistSetContent(tr_session* session, char const* contentFilename)
 
     // set the default blocklist's content
     int const ruleCount = tr_blocklistFileSetContent(b, contentFilename);
-    tr_sessionUnlock(session);
     return ruleCount;
 }
 

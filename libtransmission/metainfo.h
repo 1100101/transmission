@@ -37,7 +37,7 @@ struct tr_metainfo_parsed
 
     tr_metainfo_parsed() = default;
 
-    tr_metainfo_parsed(tr_metainfo_parsed&& that)
+    tr_metainfo_parsed(tr_metainfo_parsed&& that) noexcept
     {
         std::swap(this->info, that.info);
         std::swap(this->pieces, that.pieces);
@@ -58,7 +58,11 @@ std::optional<tr_metainfo_parsed> tr_metainfoParse(tr_session const* session, tr
 
 void tr_metainfoRemoveSaved(tr_session const* session, tr_info const* info);
 
-char* tr_metainfoGetBasename(tr_info const*, enum tr_metainfo_basename_format format);
+std::string tr_buildTorrentFilename(
+    std::string_view dirname,
+    tr_info const* inf,
+    enum tr_metainfo_basename_format format,
+    std::string_view suffix);
 
 void tr_metainfoMigrateFile(
     tr_session const* session,

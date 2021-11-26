@@ -815,11 +815,23 @@ void Application::Impl::on_drag_data_received(
 {
     auto const uris = selection_data.get_uris();
 
-    auto files = std::vector<Glib::RefPtr<Gio::File>>();
-    files.reserve(uris.size());
-    std::transform(uris.begin(), uris.end(), std::back_inserter(files), &Gio::File::create_for_uri);
+    if (!uris.empty())
+    {
+        auto files = std::vector<Glib::RefPtr<Gio::File>>();
+        files.reserve(uris.size());
+        std::transform(uris.begin(), uris.end(), std::back_inserter(files), &Gio::File::create_for_uri);
 
-    open_files(files);
+        open_files(files);
+    }
+    else
+    {
+        auto const text = gtr_str_strip(selection_data.get_text());
+
+        if (!text.empty())
+        {
+            core_->add_from_url(text);
+        }
+    }
 
     drag_context->drag_finish(true, false, time_);
 }
@@ -840,6 +852,7 @@ void Application::Impl::main_window_setup()
     /* register to handle URIs that get dragged onto our main window */
     wind_->drag_dest_set(Gtk::DEST_DEFAULT_ALL, Gdk::ACTION_COPY);
     wind_->drag_dest_add_uri_targets();
+    wind_->drag_dest_add_text_targets(); /* links dragged from browsers are text */
     wind_->signal_drag_data_received().connect(sigc::mem_fun(*this, &Impl::on_drag_data_received));
 }
 
@@ -1298,7 +1311,7 @@ bool Application::Impl::call_rpc_for_selected_torrents(std::string const& method
     auto* session = core_->get_session();
 
     tr_variantInitDict(&top, 2);
-    tr_variantDictAddStr(&top, TR_KEY_method, method);
+    tr_variantDictAddStrView(&top, TR_KEY_method, method);
     args = tr_variantDictAddDict(&top, TR_KEY_arguments, 1);
     ids = tr_variantDictAddList(args, TR_KEY_ids, 0);
     sel_->selected_foreach(
@@ -1337,7 +1350,7 @@ void Application::Impl::start_all_torrents()
     tr_variant request;
 
     tr_variantInitDict(&request, 1);
-    tr_variantDictAddStr(&request, TR_KEY_method, "torrent-start"sv);
+    tr_variantDictAddStrView(&request, TR_KEY_method, "torrent-start"sv);
     tr_rpc_request_exec_json(session, &request, nullptr, nullptr);
     tr_variantFree(&request);
 }
@@ -1348,7 +1361,7 @@ void Application::Impl::pause_all_torrents()
     tr_variant request;
 
     tr_variantInitDict(&request, 1);
-    tr_variantDictAddStr(&request, TR_KEY_method, "torrent-stop"sv);
+    tr_variantDictAddStrView(&request, TR_KEY_method, "torrent-stop"sv);
     tr_rpc_request_exec_json(session, &request, nullptr, nullptr);
     tr_variantFree(&request);
 }

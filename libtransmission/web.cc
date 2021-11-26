@@ -91,8 +91,10 @@ struct tr_web
     bool curl_ssl_verify;
     char* curl_ca_bundle;
     int close_mode;
+
+    std::recursive_mutex web_tasks_mutex;
     struct tr_web_task* tasks;
-    tr_lock* taskLock;
+
     char* cookie_filename;
     std::set<CURL*> paused_easy_handles;
 };
@@ -274,23 +276,23 @@ static CURL* createEasy(tr_session* s, struct tr_web* web, struct tr_web_task* t
     tr_address const* addr = tr_sessionGetPublicAddress(s, TR_AF_INET, &is_default_value);
     if (addr != nullptr && !is_default_value)
     {
-        curl_easy_setopt(e, CURLOPT_INTERFACE, tr_address_to_string(addr));
+        (void)curl_easy_setopt(e, CURLOPT_INTERFACE, tr_address_to_string(addr));
     }
 
     addr = tr_sessionGetPublicAddress(s, TR_AF_INET6, &is_default_value);
     if (addr != nullptr && !is_default_value)
     {
-        curl_easy_setopt(e, CURLOPT_INTERFACE, tr_address_to_string(addr));
+        (void)curl_easy_setopt(e, CURLOPT_INTERFACE, tr_address_to_string(addr));
     }
 
     if (!std::empty(task->cookies))
     {
-        curl_easy_setopt(e, CURLOPT_COOKIE, task->cookies.c_str());
+        (void)curl_easy_setopt(e, CURLOPT_COOKIE, task->cookies.c_str());
     }
 
     if (web->cookie_filename != nullptr)
     {
-        curl_easy_setopt(e, CURLOPT_COOKIEFILE, web->cookie_filename);
+        (void)curl_easy_setopt(e, CURLOPT_COOKIEFILE, web->cookie_filename);
     }
 
     if (!std::empty(task->range))
@@ -340,7 +342,7 @@ static struct tr_web_task* tr_webRunImpl(
 {
     struct tr_web_task* task = nullptr;
 
-    if (!session->isClosing)
+    if (!session->isClosing())
     {
         if (session->web == nullptr)
         {
@@ -363,10 +365,9 @@ static struct tr_web_task* tr_webRunImpl(
         task->response = buffer != nullptr ? buffer : evbuffer_new();
         task->freebuf = buffer != nullptr ? nullptr : task->response;
 
-        tr_lockLock(session->web->taskLock);
+        auto const lock = std::unique_lock(session->web->web_tasks_mutex);
         task->next = session->web->tasks;
         session->web->tasks = task;
-        tr_lockUnlock(session->web->taskLock);
     }
 
     return task;
@@ -411,7 +412,6 @@ static void tr_webThreadFunc(void* vsession)
 
     auto* web = new tr_web{};
     web->close_mode = ~0;
-    web->taskLock = tr_lockNew();
     web->tasks = nullptr;
     web->curl_verbose = tr_env_key_exists("TR_CURL_VERBOSE");
     web->curl_ssl_verify = !tr_env_key_exists("TR_CURL_SSL_NO_VERIFY");
@@ -450,20 +450,20 @@ static void tr_webThreadFunc(void* vsession)
         }
 
         /* add tasks from the queue */
-        tr_lockLock(web->taskLock);
-
-        while (web->tasks != nullptr)
         {
-            /* pop the task */
-            struct tr_web_task* task = web->tasks;
-            web->tasks = task->next;
-            task->next = nullptr;
+            auto const lock = std::unique_lock(web->web_tasks_mutex);
 
-            dbgmsg("adding task to curl: [%s]", task->url.c_str());
-            curl_multi_add_handle(multi, createEasy(session, web, task));
+            while (web->tasks != nullptr)
+            {
+                /* pop the task */
+                struct tr_web_task* task = web->tasks;
+                web->tasks = task->next;
+                task->next = nullptr;
+
+                dbgmsg("adding task to curl: [%s]", task->url.c_str());
+                curl_multi_add_handle(multi, createEasy(session, web, task));
+            }
         }
-
-        tr_lockUnlock(web->taskLock);
 
         /* resume any paused curl handles.
            swap paused_easy_handles to prevent oscillation
@@ -559,7 +559,6 @@ static void tr_webThreadFunc(void* vsession)
 
     /* cleanup */
     curl_multi_cleanup(multi);
-    tr_lockFree(web->taskLock);
     tr_free(web->curl_ca_bundle);
     tr_free(web->cookie_filename);
     delete web;

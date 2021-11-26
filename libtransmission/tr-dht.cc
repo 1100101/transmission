@@ -315,23 +315,23 @@ int tr_dhtInit(tr_session* ss)
 
     auto const dat_file = tr_strvPath(ss->configDir, "dht.dat"sv);
     auto benc = tr_variant{};
-    int rc = tr_variantFromFile(&benc, TR_VARIANT_FMT_BENC, dat_file.c_str(), nullptr) ? 0 : -1;
+    auto const ok = tr_variantFromFile(&benc, TR_VARIANT_PARSE_BENC, dat_file.c_str());
 
     bool have_id = false;
     uint8_t* nodes = nullptr;
     uint8_t* nodes6 = nullptr;
     size_t len = 0;
     size_t len6 = 0;
-    if (rc == 0)
+    if (ok)
     {
-        uint8_t const* raw = nullptr;
-        have_id = tr_variantDictFindRaw(&benc, TR_KEY_id, &raw, &len);
-
-        if (have_id && len == 20)
+        auto sv = std::string_view{};
+        have_id = tr_variantDictFindStrView(&benc, TR_KEY_id, &sv);
+        if (have_id && std::size(sv) == 20)
         {
-            memcpy(myid, raw, len);
+            std::copy(std::begin(sv), std::end(sv), myid);
         }
 
+        uint8_t const* raw = nullptr;
         if (ss->udp_socket != TR_BAD_SOCKET && tr_variantDictFindRaw(&benc, TR_KEY_nodes, &raw, &len) && len % 6 == 0)
         {
             nodes = static_cast<uint8_t*>(tr_memdup(raw, len));
@@ -365,8 +365,7 @@ int tr_dhtInit(tr_session* ss)
         tr_rand_buffer(myid, 20);
     }
 
-    rc = dht_init(ss->udp_socket, ss->udp6_socket, myid, nullptr);
-
+    int rc = dht_init(ss->udp_socket, ss->udp6_socket, myid, nullptr);
     if (rc < 0)
     {
         tr_free(nodes6);
@@ -623,7 +622,7 @@ static void callback(void* /*ignore*/, int event, unsigned char const* info_hash
 {
     if (event == DHT_EVENT_VALUES || event == DHT_EVENT_VALUES6)
     {
-        tr_sessionLock(session_);
+        auto const lock = session_->unique_lock();
 
         tr_torrent* const tor = tr_torrentFindFromHash(session_, info_hash);
         if (tor != nullptr && tr_torrentAllowsDHT(tor))
@@ -637,8 +636,6 @@ static void callback(void* /*ignore*/, int event, unsigned char const* info_hash
             tr_free(pex);
             tr_logAddTorDbg(tor, "Learned %d %s peers from DHT", (int)n, event == DHT_EVENT_VALUES6 ? "IPv6" : "IPv4");
         }
-
-        tr_sessionUnlock(session_);
     }
     else if (event == DHT_EVENT_SEARCH_DONE || event == DHT_EVENT_SEARCH_DONE6)
     {

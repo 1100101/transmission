@@ -317,7 +317,7 @@ static char const* torrentRemove(
     tr_rpc_idle_data* /*idle_data*/)
 {
     auto delete_flag = bool{ false };
-    tr_variantDictFindBool(args_in, TR_KEY_delete_local_data, &delete_flag);
+    (void)tr_variantDictFindBool(args_in, TR_KEY_delete_local_data, &delete_flag);
 
     tr_rpc_callback_type type = delete_flag ? TR_RPC_TORRENT_TRASHING : TR_RPC_TORRENT_REMOVING;
 
@@ -420,9 +420,9 @@ static void addTrackers(tr_info const* info, tr_variant* trackers)
     {
         tr_tracker_info const* t = &info->trackers[i];
         tr_variant* d = tr_variantListAddDict(trackers, 4);
-        tr_variantDictAddStr(d, TR_KEY_announce, t->announce);
+        tr_variantDictAddStrView(d, TR_KEY_announce, t->announce);
         tr_variantDictAddInt(d, TR_KEY_id, t->id);
-        tr_variantDictAddStr(d, TR_KEY_scrape, t->scrape);
+        tr_variantDictAddStrView(d, TR_KEY_scrape, t->scrape);
         tr_variantDictAddInt(d, TR_KEY_tier, t->tier);
     }
 }
@@ -542,7 +542,7 @@ static void initField(
         break;
 
     case TR_KEY_downloadDir:
-        tr_variantInitStr(initme, tr_torrentGetDownloadDir(tor));
+        tr_variantInitStrView(initme, tr_torrentGetDownloadDir(tor));
         break;
 
     case TR_KEY_downloadedEver:
@@ -562,7 +562,7 @@ static void initField(
         break;
 
     case TR_KEY_errorString:
-        tr_variantInitStr(initme, st->errorString);
+        tr_variantInitStrView(initme, st->errorString);
         break;
 
     case TR_KEY_eta:
@@ -584,7 +584,7 @@ static void initField(
         break;
 
     case TR_KEY_hashString:
-        tr_variantInitStr(initme, tor->info.hashString);
+        tr_variantInitStrView(initme, tor->info.hashString);
         break;
 
     case TR_KEY_haveUnchecked:
@@ -646,7 +646,7 @@ static void initField(
         break;
 
     case TR_KEY_name:
-        tr_variantInitStr(initme, tr_torrentName(tor));
+        tr_variantInitStrView(initme, tr_torrentName(tor));
         break;
 
     case TR_KEY_percentDone:
@@ -690,14 +690,14 @@ static void initField(
     case TR_KEY_pieces:
         if (tr_torrentHasMetadata(tor))
         {
-            auto const bytes = tr_torrentCreatePieceBitfield(tor);
+            auto const bytes = tor->createPieceBitfield();
             auto* enc = static_cast<char*>(tr_base64_encode(bytes.data(), std::size(bytes), nullptr));
             tr_variantInitStr(initme, enc != nullptr ? std::string_view{ enc } : ""sv);
             tr_free(enc);
         }
         else
         {
-            tr_variantInitStr(initme, ""sv);
+            tr_variantInitStrView(initme, ""sv);
         }
 
         break;
@@ -711,7 +711,7 @@ static void initField(
         break;
 
     case TR_KEY_primary_mime_type:
-        tr_variantInitStr(initme, tr_torrentPrimaryMimeType(tor));
+        tr_variantInitStrView(initme, tr_torrentPrimaryMimeType(tor));
         break;
 
     case TR_KEY_priorities:
@@ -1386,7 +1386,7 @@ static char const* torrentSetLocation(
     }
 
     auto move = bool{};
-    tr_variantDictFindBool(args_in, TR_KEY_move, &move);
+    (void)tr_variantDictFindBool(args_in, TR_KEY_move, &move);
 
     for (auto* tor : getTorrents(session, args_in))
     {
@@ -1515,7 +1515,7 @@ static void gotNewBlocklist(
     }
     else /* successfully fetched the blocklist... */
     {
-        z_stream stream;
+        auto stream = z_stream{};
         char const* configDir = tr_sessionGetConfigDir(session);
         size_t const buflen = 1024 * 128; /* 128 KiB buffer */
         auto* const buf = static_cast<uint8_t*>(tr_malloc(buflen));
@@ -1530,7 +1530,12 @@ static void gotNewBlocklist(
         stream.opaque = (voidpf)Z_NULL;
         stream.next_in = reinterpret_cast<Bytef const*>(std::data(response));
         stream.avail_in = std::size(response);
-        inflateInit2(&stream, windowBits);
+        if (inflateInit2(&stream, windowBits) != Z_OK)
+        {
+            // If stream init fails, log an error but keep going forward
+            // since the file may be uncompressed anyway.
+            tr_logAddError("inflateInit2 failed: %s", stream.msg ? stream.msg : "unknown");
+        }
 
         auto filename = tr_strvPath(configDir, "blocklist.tmp.XXXXXX");
         tr_sys_file_t const fd = tr_sys_file_open_temp(std::data(filename), &error);
@@ -2290,7 +2295,7 @@ static void addSessionField(tr_session* s, tr_variant* d, tr_quark key)
         break;
 
     case TR_KEY_rpc_version_semver:
-        tr_variantDictAddStr(d, key, RPC_VERSION_SEMVER);
+        tr_variantDictAddStrView(d, key, RPC_VERSION_SEMVER);
         break;
 
     case TR_KEY_rpc_version_minimum:
@@ -2382,7 +2387,7 @@ static void addSessionField(tr_session* s, tr_variant* d, tr_quark key)
         break;
 
     case TR_KEY_version:
-        tr_variantDictAddStr(d, key, LONG_VERSION_STRING);
+        tr_variantDictAddStrView(d, key, LONG_VERSION_STRING);
         break;
 
     case TR_KEY_encryption:
