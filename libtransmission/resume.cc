@@ -139,14 +139,12 @@ static uint64_t loadLabels(tr_variant* dict, tr_torrent* tor)
 
 static void saveDND(tr_variant* dict, tr_torrent const* tor)
 {
-    tr_info const* const inf = tr_torrentInfo(tor);
-    tr_file_index_t const n = inf->fileCount;
-
+    auto const n = tr_torrentFileCount(tor);
     tr_variant* const list = tr_variantDictAddList(dict, TR_KEY_dnd, n);
 
     for (tr_file_index_t i = 0; i < n; ++i)
     {
-        tr_variantListAddBool(list, inf->files[i].dnd);
+        tr_variantListAddBool(list, !tr_torrentFile(tor, i).wanted);
     }
 }
 
@@ -158,38 +156,27 @@ static uint64_t loadDND(tr_variant* dict, tr_torrent* tor)
 
     if (tr_variantDictFindList(dict, TR_KEY_dnd, &list) && tr_variantListSize(list) == n)
     {
-        tr_file_index_t* dl = tr_new(tr_file_index_t, n);
-        tr_file_index_t* dnd = tr_new(tr_file_index_t, n);
-        tr_file_index_t dlCount = 0;
-        tr_file_index_t dndCount = 0;
+        auto wanted = std::vector<tr_file_index_t>{};
+        auto unwanted = std::vector<tr_file_index_t>{};
+        wanted.reserve(n);
+        unwanted.reserve(n);
 
         for (tr_file_index_t i = 0; i < n; ++i)
         {
             auto tmp = false;
             if (tr_variantGetBool(tr_variantListChild(list, i), &tmp) && tmp)
             {
-                dnd[dndCount++] = i;
+                unwanted.push_back(i);
             }
             else
             {
-                dl[dlCount++] = i;
+                wanted.push_back(i);
             }
         }
 
-        if (dndCount != 0)
-        {
-            tr_torrentInitFileDLs(tor, dnd, dndCount, false);
-            tr_logAddTorDbg(tor, "Resume file found %d files listed as dnd", dndCount);
-        }
+        tor->initFilesWanted(std::data(unwanted), std::size(unwanted), false);
+        tor->initFilesWanted(std::data(wanted), std::size(wanted), true);
 
-        if (dlCount != 0)
-        {
-            tr_torrentInitFileDLs(tor, dl, dlCount, true);
-            tr_logAddTorDbg(tor, "Resume file found %d files marked for download", dlCount);
-        }
-
-        tr_free(dnd);
-        tr_free(dl);
         ret = TR_FR_DND;
     }
     else
@@ -212,13 +199,12 @@ static uint64_t loadDND(tr_variant* dict, tr_torrent* tor)
 
 static void saveFilePriorities(tr_variant* dict, tr_torrent const* tor)
 {
-    tr_info const* const inf = tr_torrentInfo(tor);
-    tr_file_index_t const n = inf->fileCount;
+    auto const n = tr_torrentFileCount(tor);
 
     tr_variant* const list = tr_variantDictAddList(dict, TR_KEY_priority, n);
     for (tr_file_index_t i = 0; i < n; ++i)
     {
-        tr_variantListAddInt(list, inf->files[i].priority);
+        tr_variantListAddInt(list, tr_torrentFile(tor, i).priority);
     }
 }
 
@@ -235,7 +221,7 @@ static uint64_t loadFilePriorities(tr_variant* dict, tr_torrent* tor)
             auto priority = int64_t{};
             if (tr_variantGetInt(tr_variantListChild(list, i), &priority))
             {
-                tr_torrentInitFilePriority(tor, i, priority);
+                tor->setFilePriority(i, priority);
             }
         }
 
@@ -411,7 +397,7 @@ static void saveFilenames(tr_variant* dict, tr_torrent const* tor)
 
     for (tr_file_index_t i = 0; !any_renamed && i < n; ++i)
     {
-        any_renamed = files[i].is_renamed;
+        any_renamed = files[i].priv.is_renamed;
     }
 
     if (any_renamed)
@@ -420,7 +406,7 @@ static void saveFilenames(tr_variant* dict, tr_torrent const* tor)
 
         for (tr_file_index_t i = 0; i < n; ++i)
         {
-            tr_variantListAddStrView(list, files[i].is_renamed ? files[i].name : "");
+            tr_variantListAddStrView(list, files[i].priv.is_renamed ? files[i].name : "");
         }
     }
 }
@@ -442,7 +428,7 @@ static uint64_t loadFilenames(tr_variant* dict, tr_torrent* tor)
         {
             tr_free(files[i].name);
             files[i].name = tr_strvDup(sv);
-            files[i].is_renamed = true;
+            files[i].priv.is_renamed = true;
         }
     }
 
@@ -493,11 +479,11 @@ static void saveProgress(tr_variant* dict, tr_torrent* tor)
     tr_variant* const prog = tr_variantDictAddDict(dict, TR_KEY_progress, 4);
 
     // add the mtimes
-    size_t const n = inf->fileCount;
+    size_t const n = tr_torrentFileCount(tor);
     tr_variant* const l = tr_variantDictAddList(prog, TR_KEY_mtimes, n);
-    for (auto const *file = inf->files, *end = file + inf->fileCount; file != end; ++file)
+    for (auto const *file = inf->files, *end = file + n; file != end; ++file)
     {
-        tr_variantListAddInt(l, file->mtime);
+        tr_variantListAddInt(l, file->priv.mtime);
     }
 
     // add the 'checked pieces' bitfield
@@ -538,14 +524,14 @@ static uint64_t loadProgress(tr_variant* dict, tr_torrent* tor)
     auto ret = uint64_t{};
     tr_info const* inf = tr_torrentInfo(tor);
 
-    tr_variant* prog = nullptr;
-    if (tr_variantDictFindDict(dict, TR_KEY_progress, &prog))
+    if (tr_variant* prog = nullptr; tr_variantDictFindDict(dict, TR_KEY_progress, &prog))
     {
         /// CHECKED PIECES
 
         auto checked = tr_bitfield(inf->pieceCount);
         auto mtimes = std::vector<time_t>{};
-        mtimes.reserve(inf->fileCount);
+        auto const n_files = tr_torrentFileCount(tor);
+        mtimes.reserve(n_files);
 
         // try to load mtimes
         tr_variant* l = nullptr;
@@ -570,10 +556,9 @@ static uint64_t loadProgress(tr_variant* dict, tr_torrent* tor)
         // maybe it's a .resume file from [2.20 - 3.00] with the per-piece mtimes
         if (tr_variantDictFindList(prog, TR_KEY_time_checked, &l))
         {
-            for (tr_file_index_t fi = 0; fi < inf->fileCount; ++fi)
+            for (tr_file_index_t fi = 0; fi < n_files; ++fi)
             {
                 tr_variant* const b = tr_variantListChild(l, fi);
-                tr_file* const f = &inf->files[fi];
                 auto time_checked = time_t{};
 
                 if (tr_variantIsInt(b))
@@ -588,8 +573,8 @@ static uint64_t loadProgress(tr_variant* dict, tr_torrent* tor)
                     tr_variantGetInt(tr_variantListChild(b, 0), &offset);
 
                     time_checked = tr_time();
-                    size_t const pieces = f->lastPiece + 1 - f->firstPiece;
-                    for (size_t i = 0; i < pieces; ++i)
+                    auto const [begin, end] = tor->piecesInFile(fi);
+                    for (size_t i = 0, n = end - begin; i < n; ++i)
                     {
                         int64_t piece_time = 0;
                         tr_variantGetInt(tr_variantListChild(b, i + 1), &piece_time);
@@ -887,7 +872,7 @@ static uint64_t loadFromFile(tr_torrent* tor, uint64_t fieldsToLoad, bool* didRe
     // Only load file priorities if we are actually downloading.
     // If we're a seed or partial seed, loading it is a waste of time.
     // NB: this is why loadProgress() comes before loadFilePriorities()
-    if (tor->isDone() && (fieldsToLoad & TR_FR_FILE_PRIORITIES) != 0)
+    if (!tor->isDone() && (fieldsToLoad & TR_FR_FILE_PRIORITIES) != 0)
     {
         fieldsLoaded |= loadFilePriorities(&top, tor);
     }

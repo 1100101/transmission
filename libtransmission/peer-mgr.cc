@@ -506,8 +506,8 @@ void tr_peerMgrSetUtpFailed(tr_torrent* tor, tr_address const* addr, bool failed
 ***
 *** 1. tr_swarm::active_requests, an opaque class that tracks what requests
 ***    we currently have, i.e. which blocks and from which peers.
-***    This is used for (a) cancelling requests that have been waiting
-***    for too long and (b) avoiding duplicate requests.
+***    This is used for cancelling requests that have been waiting
+***    for too long and avoiding duplicate requests.
 ***
 *** 2. tr_swarm::pieces, an array of "struct weighted_piece" which lists the
 ***    pieces that we want to request. It's used to decide which blocks to
@@ -541,7 +541,6 @@ static int countActiveWebseeds(tr_swarm* s)
 // TODO: if we keep this, add equivalent API to ActiveRequest
 void tr_peerMgrClientSentRequests(tr_torrent* torrent, tr_peer* peer, tr_block_span_t span)
 {
-    // std::cout << __FILE__ << ':' << __LINE__ << " tr_peerMgrClientSentRequests [" << range.begin << "..." << range.end << ')' << std::endl;
     auto const now = tr_time();
 
     for (tr_block_index_t block = span.begin; block < span.end; ++block)
@@ -569,6 +568,8 @@ std::vector<tr_block_span_t> tr_peerMgrGetNextRequests(tr_torrent* torrent, tr_p
         {
         }
 
+        ~PeerInfoImpl() override = default;
+
         bool clientCanRequestBlock(tr_block_index_t block) const override
         {
             return !torrent_->hasBlock(block) && !swarm_->active_requests.has(block, peer_);
@@ -576,7 +577,7 @@ std::vector<tr_block_span_t> tr_peerMgrGetNextRequests(tr_torrent* torrent, tr_p
 
         bool clientCanRequestPiece(tr_piece_index_t piece) const override
         {
-            return !torrent_->pieceIsDnd(piece) && peer_->have.test(piece);
+            return torrent_->pieceIsWanted(piece) && peer_->have.test(piece);
         }
 
         bool isEndgame() const override
@@ -1693,7 +1694,7 @@ uint64_t tr_peerMgrGetDesiredAvailable(tr_torrent const* tor)
 
     for (size_t i = 0; i < n_pieces; ++i)
     {
-        if (!tor->pieceIsDnd(i) && have.at(i))
+        if (tor->pieceIsWanted(i) && have.at(i))
         {
             desired_available += tor->countMissingBytesInPiece(i);
         }
@@ -2021,7 +2022,7 @@ static void rechokeDownloads(tr_swarm* s)
 
         for (int i = 0; i < n; ++i)
         {
-            piece_is_interesting[i] = !tor->pieceIsDnd(i) && !tor->hasPiece(i);
+            piece_is_interesting[i] = tor->pieceIsWanted(i) && !tor->hasPiece(i);
         }
 
         /* decide WHICH peers to be interested in (based on their cancel-to-block ratio) */
@@ -2702,7 +2703,7 @@ static void bandwidthPulse(evutil_socket_t /*fd*/, short /*what*/, void* vmgr)
         if (tor->swarm->needsCompletenessCheck)
         {
             tor->swarm->needsCompletenessCheck = false;
-            tr_torrentRecheckCompleteness(tor);
+            tor->recheckCompleteness();
         }
 
         /* stop torrents that are ready to stop, but couldn't be stopped

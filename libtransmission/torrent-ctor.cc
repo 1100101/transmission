@@ -46,8 +46,8 @@ struct tr_ctor
 
     std::string incomplete_dir;
 
-    std::vector<tr_file_index_t> want;
-    std::vector<tr_file_index_t> not_want;
+    std::vector<tr_file_index_t> wanted;
+    std::vector<tr_file_index_t> unwanted;
     std::vector<tr_file_index_t> low;
     std::vector<tr_file_index_t> normal;
     std::vector<tr_file_index_t> high;
@@ -131,8 +131,7 @@ int tr_ctorSetMetainfoFromFile(tr_ctor* ctor, char const* filename)
         return EILSEQ;
     }
 
-    int const err = parseMetainfoContents(ctor);
-    if (err)
+    if (int const err = parseMetainfoContents(ctor); err != 0)
     {
         clearMetainfo(ctor);
         return err;
@@ -141,9 +140,7 @@ int tr_ctorSetMetainfoFromFile(tr_ctor* ctor, char const* filename)
     setSourceFile(ctor, filename);
 
     /* if no `name' field was set, then set it from the filename */
-    tr_variant* info = nullptr;
-
-    if (tr_variantDictFindDict(&ctor->metainfo, TR_KEY_info, &info))
+    if (tr_variant* info = nullptr; tr_variantDictFindDict(&ctor->metainfo, TR_KEY_info, &info))
     {
         auto name = std::string_view{};
 
@@ -191,32 +188,21 @@ void tr_ctorSetFilePriorities(tr_ctor* ctor, tr_file_index_t const* files, tr_fi
 
 void tr_ctorInitTorrentPriorities(tr_ctor const* ctor, tr_torrent* tor)
 {
-    for (auto file_index : ctor->low)
-    {
-        tr_torrentInitFilePriority(tor, file_index, TR_PRI_LOW);
-    }
-
-    for (auto file_index : ctor->normal)
-    {
-        tr_torrentInitFilePriority(tor, file_index, TR_PRI_NORMAL);
-    }
-
-    for (auto file_index : ctor->high)
-    {
-        tr_torrentInitFilePriority(tor, file_index, TR_PRI_HIGH);
-    }
+    tor->setFilePriorities(std::data(ctor->low), std::size(ctor->low), TR_PRI_LOW);
+    tor->setFilePriorities(std::data(ctor->normal), std::size(ctor->normal), TR_PRI_NORMAL);
+    tor->setFilePriorities(std::data(ctor->high), std::size(ctor->high), TR_PRI_HIGH);
 }
 
 void tr_ctorSetFilesWanted(tr_ctor* ctor, tr_file_index_t const* files, tr_file_index_t fileCount, bool wanted)
 {
-    auto& indices = wanted ? ctor->want : ctor->not_want;
+    auto& indices = wanted ? ctor->wanted : ctor->unwanted;
     indices.assign(files, files + fileCount);
 }
 
 void tr_ctorInitTorrentWanted(tr_ctor const* ctor, tr_torrent* tor)
 {
-    tr_torrentInitFileDLs(tor, std::data(ctor->not_want), std::size(ctor->not_want), false);
-    tr_torrentInitFileDLs(tor, std::data(ctor->want), std::size(ctor->want), true);
+    tor->initFilesWanted(std::data(ctor->unwanted), std::size(ctor->unwanted), false);
+    tor->initFilesWanted(std::data(ctor->wanted), std::size(ctor->wanted), true);
 }
 
 /***

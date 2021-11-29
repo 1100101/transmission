@@ -7,6 +7,7 @@
  */
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "transmission.h"
@@ -58,7 +59,7 @@ uint64_t tr_completion::computeSizeWhenDone() const
     auto size = size_t{ 0 };
     for (tr_piece_index_t piece = 0; piece < block_info_->n_pieces; ++piece)
     {
-        if (!tor_->pieceIsDnd(piece))
+        if (tor_->pieceIsWanted(piece))
         {
             size += block_info_->pieceSize(piece);
         }
@@ -91,7 +92,7 @@ void tr_completion::amountDone(float* tab, size_t n_tabs) const
     auto const blocks_per_tab = std::size(blocks_) / n_tabs;
     for (size_t i = 0; i < n_tabs; ++i)
     {
-        auto const begin = i * n_tabs;
+        auto const begin = i * blocks_per_tab;
         auto const end = std::min(begin + blocks_per_tab, std::size(blocks_));
         auto const numerator = blocks_.count(begin, end);
         tab[i] = (double)numerator / (end - begin);
@@ -134,13 +135,12 @@ std::vector<uint8_t> tr_completion::createPieceBitfield() const
     size_t const n = block_info_->n_pieces;
     auto pieces = tr_bitfield{ n };
 
-    bool* const flags = new bool[n];
+    auto flags = std::make_unique<bool[]>(n);
     for (tr_piece_index_t piece = 0; piece < n; ++piece)
     {
         flags[piece] = hasPiece(piece);
     }
-    pieces.setFromBools(flags, n);
-    delete[] flags;
+    pieces.setFromBools(flags.get(), n);
 
     return pieces.raw();
 }

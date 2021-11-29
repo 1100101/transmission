@@ -29,7 +29,9 @@ struct tr_completion
 {
     struct torrent_view
     {
-        virtual bool pieceIsDnd(tr_piece_index_t piece) const = 0;
+        virtual bool pieceIsWanted(tr_piece_index_t piece) const = 0;
+
+        virtual ~torrent_view() = default;
     };
 
     explicit tr_completion(torrent_view const* tor, tr_block_info const* block_info)
