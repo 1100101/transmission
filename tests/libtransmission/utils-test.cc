@@ -16,7 +16,6 @@
 
 #include "transmission.h"
 
-#include "ConvertUTF.h" // tr_utf8_validate()
 #include "crypto-utils.h" // tr_rand_int_weak()
 #include "platform.h"
 #include "ptrarray.h"
@@ -182,26 +181,26 @@ TEST_F(UtilsTest, trUtf8clean)
     in = "\x92\xE0\xE3\xA4\xAD\xAE \xA1\xEB\xE2\xEC \x81\xAE\xA3\xAE\xAC"sv;
     out = makeString(tr_utf8clean(in));
     EXPECT_TRUE(std::size(out) == 17 || std::size(out) == 33);
-    EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
+    EXPECT_TRUE(tr_utf8_validate(out, nullptr));
 
     // same string, but utf-8 clean
     in = "Трудно быть Богом"sv;
     out = makeString(tr_utf8clean(in));
     EXPECT_NE(nullptr, out.data());
-    EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
+    EXPECT_TRUE(tr_utf8_validate(out, nullptr));
     EXPECT_EQ(in, out);
 
     in = "\xF4\x00\x81\x82"sv;
     out = makeString(tr_utf8clean(in));
     EXPECT_NE(nullptr, out.data());
     EXPECT_TRUE(out.size() == 1 || out.size() == 2);
-    EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
+    EXPECT_TRUE(tr_utf8_validate(out, nullptr));
 
     in = "\xF4\x33\x81\x82"sv;
     out = makeString(tr_utf8clean(in));
     EXPECT_NE(nullptr, out.data());
     EXPECT_TRUE(out.size() == 4 || out.size() == 7);
-    EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
+    EXPECT_TRUE(tr_utf8_validate(out, nullptr));
 }
 
 TEST_F(UtilsTest, trStrvUtf8Clean)
@@ -218,13 +217,13 @@ TEST_F(UtilsTest, trStrvUtf8Clean)
     in = "\x92\xE0\xE3\xA4\xAD\xAE \xA1\xEB\xE2\xEC \x81\xAE\xA3\xAE\xAC"sv;
     out = tr_strvUtf8Clean(in);
     EXPECT_TRUE(std::size(out) == 17 || std::size(out) == 33);
-    EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
+    EXPECT_TRUE(tr_utf8_validate(out, nullptr));
 
     // same string, but utf-8 clean
     in = "Трудно быть Богом"sv;
     out = tr_strvUtf8Clean(in);
     EXPECT_NE(nullptr, out.data());
-    EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
+    EXPECT_TRUE(tr_utf8_validate(out, nullptr));
     EXPECT_EQ(in, out);
 
     // https://trac.transmissionbt.com/ticket/6064
@@ -236,13 +235,13 @@ TEST_F(UtilsTest, trStrvUtf8Clean)
     out = tr_strvUtf8Clean(in);
     EXPECT_NE(nullptr, out.data());
     EXPECT_TRUE(out.size() == 1 || out.size() == 2);
-    EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
+    EXPECT_TRUE(tr_utf8_validate(out, nullptr));
 
     in = "\xF4\x33\x81\x82"sv;
     out = tr_strvUtf8Clean(in);
     EXPECT_NE(nullptr, out.data());
     EXPECT_TRUE(out.size() == 4 || out.size() == 7);
-    EXPECT_TRUE(tr_utf8_validate(out.c_str(), out.size(), nullptr));
+    EXPECT_TRUE(tr_utf8_validate(out, nullptr));
 }
 
 TEST_F(UtilsTest, trParseNumberRange)
@@ -484,4 +483,32 @@ TEST_F(UtilsTest, mimeTypes)
     EXPECT_EQ("video/x-msvideo"sv, tr_get_mime_type_for_filename(".avi"sv));
     EXPECT_EQ("video/x-msvideo"sv, tr_get_mime_type_for_filename("/path/to/FILENAME.AVI"sv));
     EXPECT_EQ("application/octet-stream"sv, tr_get_mime_type_for_filename("music.ajoijfeisfe"sv));
+}
+
+TEST_F(UtilsTest, saveFile)
+{
+    // save a file to GoogleTest's temp dir
+    auto filename = tr_strvJoin(::testing::TempDir(), "filename.txt");
+    auto contents = "these are the contents"sv;
+    tr_error* error = nullptr;
+    EXPECT_TRUE(tr_saveFile(filename.c_str(), contents, &error));
+    EXPECT_EQ(nullptr, error);
+
+    // now read the file back in and confirm the contents are the same
+    auto buf = std::vector<char>{};
+    EXPECT_TRUE(tr_loadFile(buf, filename.c_str(), &error));
+    EXPECT_EQ(nullptr, error);
+    auto sv = std::string_view{ std::data(buf), std::size(buf) };
+    EXPECT_EQ(contents, sv);
+
+    // remove the tempfile
+    EXPECT_TRUE(tr_sys_path_remove(filename.c_str(), &error));
+    EXPECT_EQ(nullptr, error);
+
+    // try saving a file to a path that doesn't exist
+    filename = "/this/path/does/not/exist/foo.txt";
+    EXPECT_FALSE(tr_saveFile(filename.c_str(), contents, &error));
+    ASSERT_NE(nullptr, error);
+    EXPECT_NE(0, error->code);
+    tr_error_clear(&error);
 }
