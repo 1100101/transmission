@@ -12,7 +12,9 @@
 #error only libtransmission should #include this header.
 #endif
 
-#include <inttypes.h> /* uint16_t */
+#include <cinttypes> // uintX_t
+#include <cstdlib> // size_t
+#include <vector>
 
 #ifdef _WIN32
 #include <winsock2.h> /* struct in_addr */
@@ -138,7 +140,7 @@ void tr_peerMgrOnBlocklistChanged(tr_peerMgr* manager);
 
 struct tr_peer_stat* tr_peerMgrPeerStats(tr_torrent const* tor, int* setmeCount);
 
-double* tr_peerMgrWebSpeeds_KBps(tr_torrent const* tor);
+tr_webseed_view tr_peerMgrWebseed(tr_torrent const* tor, size_t i);
 
 unsigned int tr_peerGetPieceSpeed_Bps(tr_peer const* peer, uint64_t now, tr_direction direction);
 

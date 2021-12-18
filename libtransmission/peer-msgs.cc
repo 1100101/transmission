@@ -11,6 +11,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <memory> // std::unique_ptr
 #include <optional>
@@ -233,7 +234,7 @@ public:
         , callback_{ callback }
         , callbackData_{ callbackData }
     {
-        if (tr_torrentAllowsPex(torrent))
+        if (torrent->allowsPex())
         {
             pex_timer.reset(evtimer_new(torrent->session->event_base, pexPulse, this));
             tr_timerAdd(pex_timer.get(), PexIntervalSecs, 0);
@@ -535,13 +536,13 @@ private:
 
         // TR_PEER_TO_CLIENT
 
-        if (!tr_torrentHasMetadata(torrent))
+        if (!torrent->hasMetadata())
         {
             return true;
         }
 
         auto const active = is_client_interested() && !is_client_choked();
-        TR_ASSERT(!active || !tr_torrentIsSeed(torrent));
+        TR_ASSERT(!active || !torrent->isDone());
         return active;
     }
 
@@ -1028,11 +1029,11 @@ static void sendLtepHandshake(tr_peerMsgsImpl* msgs)
     msgs->clientSentLtepHandshake = true;
 
     /* decide if we want to advertise metadata xfer support (BEP 9) */
-    bool const allow_metadata_xfer = !tr_torrentIsPrivate(msgs->torrent);
+    bool const allow_metadata_xfer = msgs->torrent->isPublic();
 
     /* decide if we want to advertise pex support */
     auto allow_pex = bool{};
-    if (!tr_torrentAllowsPex(msgs->torrent))
+    if (!msgs->torrent->allowsPex())
     {
         allow_pex = false;
     }
@@ -1058,7 +1059,7 @@ static void sendLtepHandshake(tr_peerMsgsImpl* msgs)
     // It also adds "metadata_size" to the handshake message (not the
     // "m" dictionary) specifying an integer value of the number of
     // bytes of the metadata.
-    if (allow_metadata_xfer && tr_torrentHasMetadata(msgs->torrent) && msgs->torrent->infoDictLength > 0)
+    if (allow_metadata_xfer && msgs->torrent->hasMetadata() && msgs->torrent->infoDictLength > 0)
     {
         tr_variantDictAddInt(&val, TR_KEY_metadata_size, msgs->torrent->infoDictLength);
     }
@@ -1087,7 +1088,7 @@ static void sendLtepHandshake(tr_peerMsgsImpl* msgs)
     // the extension handshake 'upload_only'. Setting the value of this
     // key to 1 indicates that this peer is not interested in downloading
     // anything.
-    tr_variantDictAddBool(&val, TR_KEY_upload_only, tr_torrentIsSeed(msgs->torrent));
+    tr_variantDictAddBool(&val, TR_KEY_upload_only, msgs->torrent->isDone());
 
     if (allow_metadata_xfer || allow_pex)
     {
@@ -1257,8 +1258,8 @@ static void parseUtMetadata(tr_peerMsgsImpl* msgs, uint32_t msglen, struct evbuf
         /* NOOP */
     }
 
-    if (msg_type == METADATA_MSG_TYPE_DATA && !tr_torrentHasMetadata(msgs->torrent) &&
-        msg_end - benc_end <= METADATA_PIECE_SIZE && piece * METADATA_PIECE_SIZE + (msg_end - benc_end) <= total_size)
+    if (msg_type == METADATA_MSG_TYPE_DATA && !msgs->torrent->hasMetadata() && msg_end - benc_end <= METADATA_PIECE_SIZE &&
+        piece * METADATA_PIECE_SIZE + (msg_end - benc_end) <= total_size)
     {
         int const pieceLen = msg_end - benc_end;
         tr_torrentSetMetadataPiece(msgs->torrent, piece, benc_end, pieceLen);
@@ -1266,7 +1267,7 @@ static void parseUtMetadata(tr_peerMsgsImpl* msgs, uint32_t msglen, struct evbuf
 
     if (msg_type == METADATA_MSG_TYPE_REQUEST)
     {
-        if (piece >= 0 && tr_torrentHasMetadata(msgs->torrent) && !tr_torrentIsPrivate(msgs->torrent) &&
+        if (piece >= 0 && msgs->torrent->hasMetadata() && msgs->torrent->isPublic() &&
             msgs->peerAskedForMetadataCount < MetadataReqQ)
         {
             msgs->peerAskedForMetadata[msgs->peerAskedForMetadataCount++] = piece;
@@ -1302,7 +1303,7 @@ static void parseUtMetadata(tr_peerMsgsImpl* msgs, uint32_t msglen, struct evbuf
 static void parseUtPex(tr_peerMsgsImpl* msgs, uint32_t msglen, struct evbuffer* inbuf)
 {
     tr_torrent* tor = msgs->torrent;
-    if (!tr_torrentAllowsPex(tor))
+    if (!tor->allowsPex())
     {
         return;
     }
@@ -1532,9 +1533,9 @@ static bool messageLengthIsCorrect(tr_peerMsgsImpl const* msg, uint8_t id, uint3
         return len == 5;
 
     case BtBitfield:
-        if (tr_torrentHasMetadata(msg->torrent))
+        if (msg->torrent->hasMetadata())
         {
-            return len == (msg->torrent->info.pieceCount >> 3) + ((msg->torrent->info.pieceCount & 7) != 0 ? 1 : 0) + 1U;
+            return len == (msg->torrent->pieceCount() >> 3) + ((msg->torrent->pieceCount() & 7) != 0 ? 1 : 0) + 1U;
         }
 
         /* we don't know the piece count yet,
@@ -1694,7 +1695,7 @@ static ReadState readBtMessage(tr_peerMsgsImpl* msgs, struct evbuffer* inbuf, si
         tr_peerIoReadUint32(msgs->io, inbuf, &ui32);
         dbgmsg(msgs, "got Have: %u", ui32);
 
-        if (tr_torrentHasMetadata(msgs->torrent) && ui32 >= msgs->torrent->info.pieceCount)
+        if (msgs->torrent->hasMetadata() && ui32 >= msgs->torrent->pieceCount())
         {
             msgs->publishError(ERANGE);
             return READ_ERR;
@@ -1750,6 +1751,11 @@ static ReadState readBtMessage(tr_peerMsgsImpl* msgs, struct evbuffer* inbuf, si
                 {
                     tr_removeElementFromArray(msgs->peerAskedFor, i, sizeof(struct peer_request), msgs->pendingReqsToClient);
                     --msgs->pendingReqsToClient;
+                    if (fext)
+                    {
+                        protocolSendReject(msgs, &r);
+                    }
+
                     break;
                 }
             }
@@ -1999,7 +2005,7 @@ static void updateDesiredRequestCount(tr_peerMsgsImpl* msgs)
     tr_torrent const* const torrent = msgs->torrent;
 
     /* there are lots of reasons we might not want to request any blocks... */
-    if (tr_torrentIsSeed(torrent) || !tr_torrentHasMetadata(torrent) || msgs->client_is_choked_ || !msgs->client_is_interested_)
+    if (torrent->isDone() || !torrent->hasMetadata() || msgs->client_is_choked_ || !msgs->client_is_interested_)
     {
         msgs->desired_request_count = 0;
     }
@@ -2011,7 +2017,7 @@ static void updateDesiredRequestCount(tr_peerMsgsImpl* msgs)
         auto rate_Bps = tr_peerGetPieceSpeed_Bps(msgs, now, TR_PEER_TO_CLIENT);
         if (tr_torrentUsesSpeedLimit(torrent, TR_PEER_TO_CLIENT))
         {
-            rate_Bps = std::min(rate_Bps, tr_torrentGetSpeedLimit_Bps(torrent, TR_PEER_TO_CLIENT));
+            rate_Bps = std::min(rate_Bps, torrent->speedLimitBps(TR_PEER_TO_CLIENT));
         }
 
         /* honor the session limits, if enabled */
@@ -2064,7 +2070,7 @@ static void updateMetadataRequests(tr_peerMsgsImpl* msgs, time_t now)
 
 static void updateBlockRequests(tr_peerMsgsImpl* msgs)
 {
-    if (!tr_torrentIsPieceTransferAllowed(msgs->torrent, TR_PEER_TO_CLIENT))
+    if (!msgs->torrent->clientCanDownload())
     {
         return;
     }
@@ -2323,7 +2329,7 @@ static void gotError(tr_peerIo* /*io*/, short what, void* vmsgs)
 
 static void sendBitfield(tr_peerMsgsImpl* msgs)
 {
-    TR_ASSERT(tr_torrentHasMetadata(msgs->torrent));
+    TR_ASSERT(msgs->torrent->hasMetadata());
 
     struct evbuffer* out = msgs->outMessages;
 
@@ -2474,7 +2480,7 @@ static void tr_set_compare(
 
 static void sendPex(tr_peerMsgsImpl* msgs)
 {
-    if (msgs->peerSupportsPex && tr_torrentAllowsPex(msgs->torrent))
+    if (msgs->peerSupportsPex && msgs->torrent->allowsPex())
     {
         PexDiffs diffs;
         PexDiffs diffs6;

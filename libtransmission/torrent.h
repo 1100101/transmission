@@ -12,6 +12,8 @@
 #error only libtransmission should #include this header.
 #endif
 
+#include <cstddef> // size_t
+#include <ctime>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -20,6 +22,7 @@
 
 #include "transmission.h"
 
+#include "announce-list.h"
 #include "bandwidth.h"
 #include "bitfield.h"
 #include "block-info.h"
@@ -32,11 +35,12 @@
 #include "tr-macros.h"
 
 class tr_swarm;
+struct tr_error;
 struct tr_magnet_info;
 struct tr_metainfo_parsed;
 struct tr_session;
 struct tr_torrent;
-struct tr_torrent_tiers;
+struct tr_announcer_tiers;
 
 /**
 ***  Package-visible ctor API
@@ -72,13 +76,7 @@ void tr_torrentChangeMyPort(tr_torrent* session);
 
 tr_sha1_digest_t tr_torrentInfoHash(tr_torrent const* torrent);
 
-tr_torrent* tr_torrentFindFromHash(tr_session* session, tr_sha1_digest_t const& info_dict_hah);
-
-tr_torrent* tr_torrentFindFromHashString(tr_session* session, std::string_view hash_string);
-
 tr_torrent* tr_torrentFindFromObfuscatedHash(tr_session* session, uint8_t const* hash);
-
-bool tr_torrentIsPieceTransferAllowed(tr_torrent const* torrent, tr_direction direction);
 
 bool tr_torrentReqIsValid(tr_torrent const* tor, tr_piece_index_t index, uint32_t offset, uint32_t length);
 
@@ -100,24 +98,12 @@ void tr_torrentSave(tr_torrent* tor);
 
 void tr_torrentSetLocalError(tr_torrent* tor, char const* fmt, ...) TR_GNUC_PRINTF(2, 3);
 
-void tr_torrentSetDateAdded(tr_torrent* torrent, time_t addedDate);
-
-void tr_torrentSetDateActive(tr_torrent* torrent, time_t activityDate);
-
-void tr_torrentSetDateDone(tr_torrent* torrent, time_t doneDate);
-
-/** Return the mime-type (e.g. "audio/x-flac") that matches more of the
-    torrent's content than any other mime-type. */
-std::string_view tr_torrentPrimaryMimeType(tr_torrent const* tor);
-
 enum tr_verify_state
 {
     TR_VERIFY_NONE,
     TR_VERIFY_WAIT,
     TR_VERIFY_NOW
 };
-
-void tr_torrentSetVerifyState(tr_torrent* tor, tr_verify_state state);
 
 tr_torrent_activity tr_torrentGetActivity(tr_torrent const* tor);
 
@@ -167,6 +153,12 @@ public:
         return session->unique_lock();
     }
 
+    /// SPEED LIMIT
+
+    void setSpeedLimitBps(tr_direction, unsigned int Bps);
+
+    unsigned int speedLimitBps(tr_direction) const;
+
     /// COMPLETION
 
     [[nodiscard]] uint64_t leftUntilDone() const
@@ -214,9 +206,19 @@ public:
         return completion.createPieceBitfield();
     }
 
-    [[nodiscard]] bool isDone() const
+    [[nodiscard]] constexpr bool isDone() const
     {
-        return completion.isDone();
+        return completeness != TR_LEECH;
+    }
+
+    [[nodiscard]] constexpr bool isSeed() const
+    {
+        return completeness == TR_SEED;
+    }
+
+    [[nodiscard]] constexpr bool isPartialSeed() const
+    {
+        return completeness == TR_PARTIAL_SEED;
     }
 
     [[nodiscard]] tr_bitfield const& blocks() const
@@ -229,10 +231,7 @@ public:
         return completion.amountDone(tab, n_tabs);
     }
 
-    void setBlocks(tr_bitfield blocks)
-    {
-        completion.setBlocks(std::move(blocks));
-    }
+    void setBlocks(tr_bitfield blocks);
 
     void setHasPiece(tr_piece_index_t piece, bool has)
     {
@@ -241,19 +240,19 @@ public:
 
     /// FILE <-> PIECE
 
-    auto piecesInFile(tr_file_index_t file) const
+    [[nodiscard]] auto piecesInFile(tr_file_index_t file) const
     {
         return fpm_.pieceSpan(file);
     }
 
     /// WANTED
 
-    bool pieceIsWanted(tr_piece_index_t piece) const final override
+    [[nodiscard]] bool pieceIsWanted(tr_piece_index_t piece) const final
     {
         return files_wanted_.pieceWanted(piece);
     }
 
-    bool fileIsWanted(tr_file_index_t file) const
+    [[nodiscard]] bool fileIsWanted(tr_file_index_t file) const
     {
         return files_wanted_.fileWanted(file);
     }
@@ -272,7 +271,7 @@ public:
 
     /// PRIORITIES
 
-    tr_priority_t piecePriority(tr_piece_index_t piece) const
+    [[nodiscard]] tr_priority_t piecePriority(tr_piece_index_t piece) const
     {
         return file_priorities_.piecePriority(piece);
     }
@@ -289,48 +288,26 @@ public:
         setDirty();
     }
 
-    /// CHECKSUMS
+    /// METAINFO - FILES
 
-    bool ensurePieceIsChecked(tr_piece_index_t piece)
+    [[nodiscard]] tr_file_index_t fileCount() const
     {
-        TR_ASSERT(piece < info.pieceCount);
-
-        if (checked_pieces_.test(piece))
-        {
-            return true;
-        }
-
-        bool const checked = checkPiece(piece);
-        this->anyDate = tr_time();
-        this->setDirty();
-
-        checked_pieces_.set(piece, checked);
-        return checked;
+        return info.fileCount;
     }
 
-    void initCheckedPieces(tr_bitfield const& checked, time_t const* mtimes /*fileCount*/)
+    [[nodiscard]] auto& file(tr_file_index_t i)
     {
-        TR_ASSERT(std::size(checked) == info.pieceCount);
-        checked_pieces_ = checked;
+        TR_ASSERT(i < this->fileCount());
 
-        auto filename = std::string{};
-        for (size_t i = 0; i < info.fileCount; ++i)
-        {
-            auto const found = this->findFile(filename, i);
-            auto const mtime = found ? found->last_modified_at : 0;
-
-            info.files[i].priv.mtime = mtime;
-
-            // if a file has changed, mark its pieces as unchecked
-            if (mtime == 0 || mtime != mtimes[i])
-            {
-                auto const [begin, end] = piecesInFile(i);
-                checked_pieces_.unsetSpan(begin, end);
-            }
-        }
+        return info.files[i];
     }
 
-    /// FINDING FILES
+    [[nodiscard]] auto const& file(tr_file_index_t i) const
+    {
+        TR_ASSERT(i < this->fileCount());
+
+        return info.files[i];
+    }
 
     struct tr_found_file_t : public tr_sys_path_info
     {
@@ -349,9 +326,190 @@ public:
 
     std::optional<tr_found_file_t> findFile(std::string& filename, tr_file_index_t i) const;
 
-    tr_info info = {};
+    /// METAINFO - TRACKERS
 
-    tr_bitfield dnd_pieces_ = tr_bitfield{ 0 };
+    [[nodiscard]] auto trackerCount() const
+    {
+        return std::size(*info.announce_list);
+    }
+
+    [[nodiscard]] auto const& tracker(size_t i) const
+    {
+        return info.announce_list->at(i);
+    }
+
+    [[nodiscard]] auto tiers() const
+    {
+        return info.announce_list->tiers();
+    }
+
+    /// METAINFO - WEBSEEDS
+
+    [[nodiscard]] auto webseedCount() const
+    {
+        return info.webseedCount;
+    }
+
+    [[nodiscard]] auto const& webseed(size_t i) const
+    {
+        TR_ASSERT(i < webseedCount());
+
+        return info.webseeds[i];
+    }
+
+    [[nodiscard]] auto& webseed(size_t i)
+    {
+        TR_ASSERT(i < webseedCount());
+
+        return info.webseeds[i];
+    }
+
+    /// METAINFO - OTHER
+
+    [[nodiscard]] auto isPrivate() const
+    {
+        return this->info.isPrivate;
+    }
+
+    [[nodiscard]] auto isPublic() const
+    {
+        return !this->isPrivate();
+    }
+
+    [[nodiscard]] auto pieceCount() const
+    {
+        return this->info.pieceCount;
+    }
+
+    [[nodiscard]] auto pieceSize() const
+    {
+        return this->info.pieceSize;
+    }
+
+    [[nodiscard]] auto pieceSize(tr_piece_index_t i) const
+    {
+        return tr_block_info::pieceSize(i);
+    }
+
+    [[nodiscard]] auto totalSize() const
+    {
+        return this->info.totalSize;
+    }
+
+    [[nodiscard]] auto hashString() const
+    {
+        return this->info.hashString;
+    }
+
+    [[nodiscard]] auto const& announceList() const
+    {
+        return *this->info.announce_list;
+    }
+
+    [[nodiscard]] auto& announceList()
+    {
+        return *this->info.announce_list;
+    }
+
+    [[nodiscard]] auto const& torrentFile() const
+    {
+        return this->info.torrent;
+    }
+
+    [[nodiscard]] auto hasMetadata() const
+    {
+        return fileCount() > 0;
+    }
+
+    /// METAINFO - CHECKSUMS
+
+    [[nodiscard]] bool ensurePieceIsChecked(tr_piece_index_t piece)
+    {
+        TR_ASSERT(piece < this->pieceCount());
+
+        if (checked_pieces_.test(piece))
+        {
+            return true;
+        }
+
+        bool const checked = checkPiece(piece);
+        this->markChanged();
+        this->setDirty();
+
+        checked_pieces_.set(piece, checked);
+        return checked;
+    }
+
+    void initCheckedPieces(tr_bitfield const& checked, time_t const* mtimes /*fileCount()*/)
+    {
+        TR_ASSERT(std::size(checked) == this->pieceCount());
+        checked_pieces_ = checked;
+
+        auto filename = std::string{};
+        for (size_t i = 0, n = this->fileCount(); i < n; ++i)
+        {
+            auto const found = this->findFile(filename, i);
+            auto const mtime = found ? found->last_modified_at : 0;
+
+            this->file(i).priv.mtime = mtime;
+
+            // if a file has changed, mark its pieces as unchecked
+            if (mtime == 0 || mtime != mtimes[i])
+            {
+                auto const [begin, end] = piecesInFile(i);
+                checked_pieces_.unsetSpan(begin, end);
+            }
+        }
+    }
+
+    ///
+
+    [[nodiscard]] auto isQueued() const
+    {
+        return this->is_queued;
+    }
+
+    [[nodiscard]] constexpr auto queueDirection() const
+    {
+        return this->isDone() ? TR_UP : TR_DOWN;
+    }
+
+    [[nodiscard]] auto allowsPex() const
+    {
+        return this->isPublic() && this->session->isPexEnabled;
+    }
+
+    [[nodiscard]] auto allowsDht() const
+    {
+        return this->isPublic() && tr_sessionAllowsDHT(this->session);
+    }
+
+    [[nodiscard]] auto allowsLpd() const // local peer discovery
+    {
+        return this->isPublic() && tr_sessionAllowsLPD(this->session);
+    }
+
+    [[nodiscard]] bool isPieceTransferAllowed(tr_direction direction) const;
+
+    [[nodiscard]] bool clientCanDownload() const
+    {
+        return this->isPieceTransferAllowed(TR_PEER_TO_CLIENT);
+    }
+
+    [[nodiscard]] bool clientCanUpload() const
+    {
+        return this->isPieceTransferAllowed(TR_CLIENT_TO_PEER);
+    }
+
+    void setVerifyState(tr_verify_state state);
+
+    void setDateActive(time_t t);
+
+    /** Return the mime-type (e.g. "audio/x-flac") that matches more of the
+        torrent's content than any other mime-type. */
+    std::string_view primaryMimeType() const;
+
+    tr_info info = {};
 
     tr_bitfield checked_pieces_ = tr_bitfield{ 0 };
 
@@ -360,7 +518,7 @@ public:
 
     tr_session* session = nullptr;
 
-    struct tr_torrent_tiers* tiers = nullptr;
+    tr_announcer_tiers* announcer_tiers = nullptr;
 
     // Changed to non-owning pointer temporarily till tr_torrent becomes C++-constructible and destructible
     // TODO: change tr_bandwidth* to owning pointer to the bandwidth, or remove * and own the value
@@ -466,7 +624,7 @@ public:
 
     bool isDeleting = false;
     bool isDirty = false;
-    bool isQueued = false;
+    bool is_queued = false;
     bool isRunning = false;
     bool isStopping = false;
     bool startAfterVerify = false;
@@ -481,6 +639,9 @@ public:
     {
         this->isDirty = true;
     }
+
+    void markEdited();
+    void markChanged();
 
     uint16_t maxConnectedPeers = TR_DEFAULT_PEER_LIMIT_TORRENT;
 
@@ -524,42 +685,6 @@ private:
     mutable std::vector<tr_sha1_digest_t> piece_checksums_;
 };
 
-static inline bool tr_torrentExists(tr_session const* session, uint8_t const* torrentHash)
-{
-    return tr_torrentFindFromHash((tr_session*)session, torrentHash) != nullptr;
-}
-
-constexpr tr_completeness tr_torrentGetCompleteness(tr_torrent const* tor)
-{
-    return tor->completeness;
-}
-
-// TODO: rename this to tr_torrentIsDone()? both seed and partial seed return true
-constexpr bool tr_torrentIsSeed(tr_torrent const* tor)
-{
-    return tr_torrentGetCompleteness(tor) != TR_LEECH;
-}
-
-constexpr bool tr_torrentIsPrivate(tr_torrent const* tor)
-{
-    return tor != nullptr && tor->info.isPrivate;
-}
-
-constexpr bool tr_torrentAllowsPex(tr_torrent const* tor)
-{
-    return tor != nullptr && tor->session->isPexEnabled && !tr_torrentIsPrivate(tor);
-}
-
-constexpr bool tr_torrentAllowsDHT(tr_torrent const* tor)
-{
-    return tor != nullptr && tr_sessionAllowsDHT(tor->session) && !tr_torrentIsPrivate(tor);
-}
-
-constexpr bool tr_torrentAllowsLPD(tr_torrent const* tor)
-{
-    return tor != nullptr && tr_sessionAllowsLPD(tor->session) && !tr_torrentIsPrivate(tor);
-}
-
 /***
 ****
 ***/
@@ -567,23 +692,6 @@ constexpr bool tr_torrentAllowsLPD(tr_torrent const* tor)
 constexpr bool tr_isTorrent(tr_torrent const* tor)
 {
     return tor != nullptr && tor->magicNumber == tr_torrent::MagicNumber && tr_isSession(tor->session);
-}
-
-/* set a flag indicating that the torrent's .resume file
- * needs to be saved when the torrent is closed */
-constexpr void tr_torrentSetDirty(tr_torrent* tor)
-{
-    TR_ASSERT(tr_isTorrent(tor));
-
-    tor->isDirty = true;
-}
-
-/* note that the torrent's tr_info just changed */
-static inline void tr_torrentMarkEdited(tr_torrent* tor)
-{
-    TR_ASSERT(tr_isTorrent(tor));
-
-    tor->editDate = tr_time();
 }
 
 /**
@@ -616,25 +724,4 @@ char* tr_torrentBuildPartial(tr_torrent const*, tr_file_index_t fileNo);
  * piece size, etc. such as in BEP 9 where peers exchange metadata */
 void tr_torrentGotNewInfoDict(tr_torrent* tor);
 
-void tr_torrentSetSpeedLimit_Bps(tr_torrent*, tr_direction, unsigned int Bps);
-unsigned int tr_torrentGetSpeedLimit_Bps(tr_torrent const*, tr_direction);
-
-/**
- * @brief Test a piece against its info dict checksum
- * @return true if the piece's passes the checksum test
- */
-bool tr_torrentCheckPiece(tr_torrent* tor, tr_piece_index_t pieceIndex);
-
-uint64_t tr_torrentGetCurrentSizeOnDisk(tr_torrent const* tor);
-
 tr_peer_id_t const& tr_torrentGetPeerId(tr_torrent* tor);
-
-constexpr bool tr_torrentIsQueued(tr_torrent const* tor)
-{
-    return tor->isQueued;
-}
-
-constexpr tr_direction tr_torrentGetQueueDirection(tr_torrent const* tor)
-{
-    return tr_torrentIsSeed(tor) ? TR_UP : TR_DOWN;
-}

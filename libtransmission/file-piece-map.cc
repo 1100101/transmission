@@ -7,13 +7,13 @@
  */
 
 #include <algorithm>
-#include <iterator>
 #include <vector>
 
 #include "transmission.h"
 
 #include "block-info.h"
 #include "file-piece-map.h"
+#include "tr-assert.h"
 
 void tr_file_piece_map::reset(tr_block_info const& block_info, uint64_t const* file_sizes, size_t n_files)
 {
@@ -128,6 +128,8 @@ void tr_file_priorities::set(tr_file_index_t const* files, size_t n, tr_priority
 
 tr_priority_t tr_file_priorities::filePriority(tr_file_index_t file) const
 {
+    TR_ASSERT(file < std::size(priorities_));
+
     return priorities_[file];
 }
 

@@ -8,9 +8,10 @@
 
 #pragma once
 
+#include <cstddef> // size_t
+#include <cinttypes> // uintX_t
+#include <ctime>
 #include <string_view>
-#include <inttypes.h>
-#include <time.h>
 
 #ifdef _WIN32
 #include <windows.h>

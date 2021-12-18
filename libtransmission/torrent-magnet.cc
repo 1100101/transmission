@@ -8,6 +8,8 @@
 
 #include <climits> /* INT_MAX */
 #include <cstring> /* memcpy(), memset(), memcmp() */
+#include <ctime>
+#include <string_view>
 
 #include <event2/buffer.h>
 
@@ -61,7 +63,7 @@ static void incompleteMetadataFree(struct tr_incomplete_metadata* m)
 
 bool tr_torrentSetMetadataSizeHint(tr_torrent* tor, int64_t size)
 {
-    if (tr_torrentHasMetadata(tor))
+    if (tor->hasMetadata())
     {
         return false;
     }
@@ -115,7 +117,7 @@ static size_t findInfoDictOffset(tr_torrent const* tor)
 
     /* load the file, and find the info dict's offset inside the file */
     auto fileLen = size_t{};
-    uint8_t* const fileContents = tr_loadFile(tor->info.torrent, &fileLen, nullptr);
+    uint8_t* const fileContents = tr_loadFile(tor->torrentFile(), &fileLen, nullptr);
     if (fileContents != nullptr)
     {
         auto top = tr_variant{};
@@ -143,7 +145,7 @@ static size_t findInfoDictOffset(tr_torrent const* tor)
 
 static void ensureInfoDictOffsetIsCached(tr_torrent* tor)
 {
-    TR_ASSERT(tr_torrentHasMetadata(tor));
+    TR_ASSERT(tor->hasMetadata());
 
     if (!tor->infoDictOffsetIsCached)
     {
@@ -160,13 +162,13 @@ void* tr_torrentGetMetadataPiece(tr_torrent* tor, int piece, size_t* len)
 
     char* ret = nullptr;
 
-    if (tr_torrentHasMetadata(tor))
+    if (tor->hasMetadata())
     {
         ensureInfoDictOffsetIsCached(tor);
 
         TR_ASSERT(tor->infoDictLength > 0);
 
-        auto const fd = tr_sys_file_open(tor->info.torrent, TR_SYS_FILE_READ, 0, nullptr);
+        auto const fd = tr_sys_file_open(tor->torrentFile(), TR_SYS_FILE_READ, 0, nullptr);
         if (fd != TR_BAD_SYS_FILE)
         {
             size_t const o = piece * METADATA_PIECE_SIZE;
@@ -284,7 +286,7 @@ void tr_torrentSetMetadataPiece(tr_torrent* tor, int piece, void const* data, in
             {
                 /* yay we have bencoded metainfo... merge it into our .torrent file */
                 tr_variant newMetainfo;
-                char* path = tr_strdup(tor->info.torrent);
+                char* path = tr_strdup(tor->torrentFile());
 
                 if (tr_variantFromFile(&newMetainfo, TR_VARIANT_PARSE_BENC, path, nullptr))
                 {
@@ -309,9 +311,9 @@ void tr_torrentSetMetadataPiece(tr_torrent* tor, int piece, void const* data, in
                         tor->swapMetainfo(*info);
 
                         /* save the new .torrent file */
-                        tr_variantToFile(&newMetainfo, TR_VARIANT_FMT_BENC, tor->info.torrent);
+                        tr_variantToFile(&newMetainfo, TR_VARIANT_FMT_BENC, tor->torrentFile());
                         tr_torrentGotNewInfoDict(tor);
-                        tr_torrentSetDirty(tor);
+                        tor->setDirty();
                     }
 
                     tr_variantFree(&newMetainfo);
@@ -329,7 +331,7 @@ void tr_torrentSetMetadataPiece(tr_torrent* tor, int piece, void const* data, in
             tor->isStopping = true;
             tor->magnetVerify = true;
             tor->startAfterVerify = !tor->prefetchMagnetMetadata;
-            tr_torrentMarkEdited(tor);
+            tor->markEdited();
         }
         else /* drat. */
         {
@@ -375,7 +377,7 @@ bool tr_torrentGetNextMetadataRequest(tr_torrent* tor, time_t now, int* setme_pi
 
 double tr_torrentGetMetadataPercent(tr_torrent const* tor)
 {
-    if (tr_torrentHasMetadata(tor))
+    if (tor->hasMetadata())
     {
         return 1.0;
     }
@@ -399,10 +401,10 @@ char* tr_torrentInfoGetMagnetLink(tr_info const* inf)
         tr_http_escape(s, name, true);
     }
 
-    for (unsigned int i = 0; i < inf->trackerCount; ++i)
+    for (size_t i = 0, n = std::size(*inf->announce_list); i < n; ++i)
     {
         evbuffer_add_printf(s, "%s", "&tr=");
-        tr_http_escape(s, inf->trackers[i].announce, true);
+        tr_http_escape(s, inf->announce_list->at(i).announce.full, true);
     }
 
     for (unsigned int i = 0; i < inf->webseedCount; i++)
@@ -412,4 +414,9 @@ char* tr_torrentInfoGetMagnetLink(tr_info const* inf)
     }
 
     return evbuffer_free_to_str(s, nullptr);
+}
+
+char* tr_torrentGetMagnetLink(tr_torrent const* tor)
+{
+    return tr_torrentInfoGetMagnetLink(&tor->info);
 }

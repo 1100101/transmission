@@ -188,9 +188,6 @@ void* tr_realloc(void* p, size_t size);
 /** @brief Portability wrapper around free() in which `nullptr' is a safe argument */
 void tr_free(void* p);
 
-/** @brief Free pointers in a nullptr-terminated array (the array itself is not freed) */
-void tr_free_ptrv(void* const* p);
-
 /**
  * @brief make a newly-allocated copy of a chunk of memory
  * @param src the memory to copy
@@ -479,6 +476,28 @@ static inline char* tr_formatter_mem_MB(char* buf, double MBps, size_t buflen)
 char* tr_formatter_size_B(char* buf, uint64_t bytes, size_t buflen);
 
 void tr_formatter_get_units(void* dict);
+
+static inline unsigned int tr_toSpeedBytes(unsigned int KBps)
+{
+    return KBps * tr_speed_K;
+}
+
+static inline auto tr_toSpeedKBps(unsigned int Bps)
+{
+    return Bps / double(tr_speed_K);
+}
+
+static inline auto tr_toMemBytes(unsigned int MB)
+{
+    auto B = uint64_t(tr_mem_K) * tr_mem_K;
+    B *= MB;
+    return B;
+}
+
+static inline auto tr_toMemMB(uint64_t B)
+{
+    return int(B / (tr_mem_K * tr_mem_K));
+}
 
 /***
 ****

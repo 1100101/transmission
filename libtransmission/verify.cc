@@ -8,7 +8,7 @@
 
 #include <algorithm>
 #include <cstdlib> /* free() */
-#include <cstring> /* memcmp() */
+#include <ctime>
 #include <mutex>
 #include <set>
 
@@ -49,9 +49,9 @@ static bool verifyTorrent(tr_torrent* tor, bool* stopFlag)
     tr_logAddTorDbg(tor, "%s", "verifying torrent...");
     tor->verify_progress = 0;
 
-    while (!*stopFlag && piece < tor->info.pieceCount)
+    while (!*stopFlag && piece < tor->pieceCount())
     {
-        auto const file_length = tor->info.files[fileIndex].length;
+        auto const file_length = tor->file(fileIndex).length;
 
         /* if we're starting a new piece... */
         if (piecePos == 0)
@@ -105,12 +105,11 @@ static bool verifyTorrent(tr_torrent* tor, bool* stopFlag)
                 changed |= hasPiece != hadPiece;
             }
 
-            time_t const now = tr_time();
-            tor->anyDate = now;
+            tor->markChanged();
 
             /* sleeping even just a few msec per second goes a long
              * way towards reducing IO load... */
-            if (lastSleptAt != now)
+            if (auto const now = tr_time(); lastSleptAt != now)
             {
                 lastSleptAt = now;
                 tr_wait_msec(MsecToSleepPerSecondDuringVerify);
@@ -118,7 +117,7 @@ static bool verifyTorrent(tr_torrent* tor, bool* stopFlag)
 
             sha = tr_sha1_init();
             ++piece;
-            tor->verify_progress = piece / double(tor->info.pieceCount);
+            tor->verify_progress = piece / double(tor->pieceCount());
             piecePos = 0;
         }
 
@@ -152,8 +151,8 @@ static bool verifyTorrent(tr_torrent* tor, bool* stopFlag)
         tor,
         "Verification is done. It took %d seconds to verify %" PRIu64 " bytes (%" PRIu64 " bytes per second)",
         (int)(end - begin),
-        tor->info.totalSize,
-        (uint64_t)(tor->info.totalSize / (1 + (end - begin))));
+        tor->totalSize(),
+        (uint64_t)(tor->totalSize() / (1 + (end - begin))));
 
     return changed;
 }
@@ -225,14 +224,14 @@ static void verifyThreadFunc(void* /*user_data*/)
 
         tr_torrent* tor = currentNode.torrent;
         tr_logAddTorInfo(tor, "%s", _("Verifying torrent"));
-        tr_torrentSetVerifyState(tor, TR_VERIFY_NOW);
+        tor->setVerifyState(TR_VERIFY_NOW);
         changed = verifyTorrent(tor, &stopCurrent);
-        tr_torrentSetVerifyState(tor, TR_VERIFY_NONE);
+        tor->setVerifyState(TR_VERIFY_NONE);
         TR_ASSERT(tr_isTorrent(tor));
 
         if (!stopCurrent && changed)
         {
-            tr_torrentSetDirty(tor);
+            tor->setDirty();
         }
 
         if (currentNode.callback_func != nullptr)
@@ -253,10 +252,10 @@ void tr_verifyAdd(tr_torrent* tor, tr_verify_done_func callback_func, void* call
     node.torrent = tor;
     node.callback_func = callback_func;
     node.callback_data = callback_data;
-    node.current_size = tr_torrentGetCurrentSizeOnDisk(tor);
+    node.current_size = tor->hasTotal();
 
     auto const lock = std::lock_guard(verify_mutex_);
-    tr_torrentSetVerifyState(tor, TR_VERIFY_WAIT);
+    tor->setVerifyState(TR_VERIFY_WAIT);
     verifyList.insert(node);
 
     if (verifyThread == nullptr)
@@ -289,7 +288,7 @@ void tr_verifyRemove(tr_torrent* tor)
             std::end(verifyList),
             [tor](auto const& task) { return tor == task.torrent; });
 
-        tr_torrentSetVerifyState(tor, TR_VERIFY_NONE);
+        tor->setVerifyState(TR_VERIFY_NONE);
 
         if (it != std::end(verifyList))
         {

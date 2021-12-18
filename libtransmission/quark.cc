@@ -8,15 +8,13 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring> // strlen()
-#include <iterator>
 #include <string_view>
 #include <vector>
 
 #include "transmission.h"
 #include "quark.h"
 #include "tr-assert.h"
-#include "utils.h" // tr_strndup()
+#include "utils.h" // tr_strvDup()
 
 using namespace std::literals;
 
@@ -466,7 +464,7 @@ tr_quark tr_quark_new(std::string_view str)
     }
 
     auto const ret = TR_N_KEYS + std::size(my_runtime);
-    my_runtime.emplace_back(tr_strndup(std::data(str), std::size(str)), std::size(str));
+    my_runtime.emplace_back(tr_strvDup(str), std::size(str));
     return ret;
 }
 

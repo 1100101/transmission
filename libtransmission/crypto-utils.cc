@@ -9,6 +9,7 @@
 #include <cstdarg>
 #include <cstring> /* memcpy(), memmove(), memset(), strcmp(), strlen() */
 #include <random> /* random_device, mt19937, uniform_int_distribution*/
+#include <string_view>
 
 #include <arc4.h>
 
@@ -92,8 +93,7 @@ int tr_rand_int(int upper_bound)
 {
     TR_ASSERT(upper_bound > 0);
 
-    unsigned int noise = 0;
-    if (tr_rand_buffer(&noise, sizeof(noise)))
+    if (unsigned int noise = 0; tr_rand_buffer(&noise, sizeof(noise)))
     {
         return noise % upper_bound;
     }

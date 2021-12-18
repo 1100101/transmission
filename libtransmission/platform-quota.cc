@@ -7,8 +7,8 @@
  */
 
 #include <cerrno>
-#include <cstdlib>
 #include <cstring>
+#include <string_view>
 
 #include <event2/util.h> /* evutil_ascii_strcasecmp() */
 

@@ -6,6 +6,7 @@
  *
  */
 
+#include <array>
 #include <stdio.h> /* fprintf() */
 #include <string.h> /* strcmp(), strchr(), memcmp() */
 #include <stdlib.h> /* qsort() */
@@ -24,21 +25,20 @@
 
 #include "units.h"
 
-#define MY_NAME "transmission-show"
-#define TIMEOUT_SECS 30
+using namespace std::literals;
 
-static tr_option options[] = {
-    { 'm', "magnet", "Give a magnet link for the specified torrent", "m", false, nullptr },
-    { 's', "scrape", "Ask the torrent's trackers how many peers are in the torrent's swarm", "s", false, nullptr },
-    { 'u', "unsorted", "Do not sort files by name", "u", false, nullptr },
-    { 'V', "version", "Show version number and exit", "V", false, nullptr },
-    { 0, nullptr, nullptr, nullptr, false, nullptr }
+static char constexpr MyName[] = "transmission-show";
+static char constexpr Usage[] = "Usage: transmission-show [options] <.torrent file>";
+
+static auto constexpr TimeoutSecs = long{ 30 };
+
+static auto constexpr Options = std::array<tr_option, 5>{
+    { { 'm', "magnet", "Give a magnet link for the specified torrent", "m", false, nullptr },
+      { 's', "scrape", "Ask the torrent's trackers how many peers are in the torrent's swarm", "s", false, nullptr },
+      { 'u', "unsorted", "Do not sort files by name", "u", false, nullptr },
+      { 'V', "version", "Show version number and exit", "V", false, nullptr },
+      { 0, nullptr, nullptr, nullptr, false, nullptr } }
 };
-
-static char const* getUsage(void)
-{
-    return "Usage: " MY_NAME " [options] <.torrent file>";
-}
 
 static bool magnetFlag = false;
 static bool scrapeFlag = false;
@@ -51,7 +51,7 @@ static int parseCommandLine(int argc, char const* const* argv)
     int c;
     char const* optarg;
 
-    while ((c = tr_getopt(getUsage(), argc, argv, options, &optarg)) != TR_OPT_DONE)
+    while ((c = tr_getopt(Usage, argc, argv, std::data(Options), &optarg)) != TR_OPT_DONE)
     {
         switch (c)
         {
@@ -115,7 +115,6 @@ static void showInfo(tr_info const* inf)
 {
     char buf[128];
     tr_file** files;
-    int prevTier = -1;
 
     /**
     ***  General Info
@@ -132,7 +131,7 @@ static void showInfo(tr_info const* inf)
         printf("  Comment: %s\n", inf->comment);
     }
 
-    printf("  Piece Count: %d\n", inf->pieceCount);
+    printf("  Piece Count: %zu\n", size_t(inf->pieceCount));
     printf("  Piece Size: %s\n", tr_formatter_mem_B(buf, inf->pieceSize, sizeof(buf)));
     printf("  Total Size: %s\n", tr_formatter_size_B(buf, inf->totalSize, sizeof(buf)));
     printf("  Privacy: %s\n", inf->isPrivate ? "Private torrent" : "Public torrent");
@@ -142,16 +141,18 @@ static void showInfo(tr_info const* inf)
     **/
 
     printf("\nTRACKERS\n");
-
-    for (unsigned int i = 0; i < inf->trackerCount; ++i)
+    auto current_tier = std::optional<tr_tracker_tier_t>{};
+    auto print_tier = size_t{ 1 };
+    for (auto const& tracker : *inf->announce_list)
     {
-        if (prevTier != inf->trackers[i].tier)
+        if (!current_tier || current_tier != tracker.tier)
         {
-            prevTier = inf->trackers[i].tier;
-            printf("\n  Tier #%d\n", prevTier + 1);
+            current_tier = tracker.tier;
+            printf("\n  Tier #%zu\n", print_tier);
+            ++print_tier;
         }
 
-        printf("  %s\n", inf->trackers[i].announce);
+        printf("  %" TR_PRIsv "\n", TR_PRIsv_ARG(tracker.announce.full));
     }
 
     /**
@@ -204,7 +205,7 @@ static size_t writeFunc(void* ptr, size_t size, size_t nmemb, void* vbuf)
 static CURL* tr_curl_easy_init(struct evbuffer* writebuf)
 {
     CURL* curl = curl_easy_init();
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, MY_NAME "/" LONG_VERSION_STRING);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, tr_strvJoin(MyName, "/", LONG_VERSION_STRING).c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFunc);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, writebuf);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
@@ -215,33 +216,28 @@ static CURL* tr_curl_easy_init(struct evbuffer* writebuf)
 
 static void doScrape(tr_info const* inf)
 {
-    for (unsigned int i = 0; i < inf->trackerCount; ++i)
+    for (auto const& tracker : *inf->announce_list)
     {
-        CURL* curl;
-        CURLcode res;
-        struct evbuffer* buf;
-        char const* scrape = inf->trackers[i].scrape;
-        char* url;
-        char escaped[SHA_DIGEST_LENGTH * 3 + 1];
-
-        if (scrape == nullptr)
+        if (tracker.scrape_interned == TR_KEY_NONE)
         {
             continue;
         }
 
+        char escaped[SHA_DIGEST_LENGTH * 3 + 1];
         tr_http_escape_sha1(escaped, inf->hash);
+        auto const scrape = tracker.scrape.full;
+        auto const url = tr_strvJoin(scrape, (tr_strvContains(scrape, '?') ? "&"sv : "?"sv), "info_hash="sv, escaped);
 
-        url = tr_strdup_printf("%s%cinfo_hash=%s", scrape, strchr(scrape, '?') != nullptr ? '&' : '?', escaped);
-
-        printf("%s ... ", url);
+        printf("%" TR_PRIsv " ... ", TR_PRIsv_ARG(url));
         fflush(stdout);
 
-        buf = evbuffer_new();
-        curl = tr_curl_easy_init(buf);
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, TIMEOUT_SECS);
+        auto* const buf = evbuffer_new();
+        auto* const curl = tr_curl_easy_init(buf);
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, TimeoutSecs);
 
-        if ((res = curl_easy_perform(curl)) != CURLE_OK)
+        auto const res = curl_easy_perform(curl);
+        if (res != CURLE_OK)
         {
             printf("error: %s\n", curl_easy_strerror(res));
         }
@@ -305,7 +301,6 @@ static void doScrape(tr_info const* inf)
 
         curl_easy_cleanup(curl);
         evbuffer_free(buf);
-        tr_free(url);
     }
 }
 
@@ -327,7 +322,7 @@ int tr_main(int argc, char* argv[])
 
     if (showVersion)
     {
-        fprintf(stderr, MY_NAME " " LONG_VERSION_STRING "\n");
+        fprintf(stderr, "%s %s\n", MyName, LONG_VERSION_STRING);
         return EXIT_SUCCESS;
     }
 
@@ -335,7 +330,7 @@ int tr_main(int argc, char* argv[])
     if (filename == nullptr)
     {
         fprintf(stderr, "ERROR: No .torrent file specified.\n");
-        tr_getopt_usage(MY_NAME, getUsage(), options);
+        tr_getopt_usage(MyName, Usage, std::data(Options));
         fprintf(stderr, "\n");
         return EXIT_FAILURE;
     }

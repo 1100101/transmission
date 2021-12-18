@@ -11,6 +11,7 @@
 #include <cstdlib> /* qsort */
 #include <cstring> /* strcmp, strlen */
 #include <mutex>
+#include <string_view>
 
 #include <event2/util.h> /* evutil_ascii_strcasecmp() */
 
@@ -28,6 +29,8 @@
 #include "variant.h"
 #include "version.h"
 #include "web-utils.h"
+
+using namespace std::literals;
 
 /****
 *****
@@ -51,17 +54,15 @@ static struct FileList* getFiles(char const* dir, char const* base, struct FileL
     tr_sys_path_native_separators(std::data(buf));
 
     tr_sys_path_info info;
-    tr_error* error = nullptr;
-    if (!tr_sys_path_get_info(buf.c_str(), 0, &info, &error))
+    if (tr_error* error = nullptr; !tr_sys_path_get_info(buf.c_str(), 0, &info, &error))
     {
         tr_logAddError(_("Torrent Creator is skipping file \"%s\": %s"), buf.c_str(), error->message);
         tr_error_free(error);
         return list;
     }
 
-    tr_sys_dir_t odir = info.type == TR_SYS_PATH_IS_DIRECTORY ? tr_sys_dir_open(buf.c_str(), nullptr) : TR_BAD_SYS_DIR;
-
-    if (odir != TR_BAD_SYS_DIR)
+    if (tr_sys_dir_t odir = info.type == TR_SYS_PATH_IS_DIRECTORY ? tr_sys_dir_open(buf.c_str(), nullptr) : TR_BAD_SYS_DIR;
+        odir != TR_BAD_SYS_DIR)
     {
         char const* name = nullptr;
         while ((name = tr_sys_dir_read_name(odir, nullptr)) != nullptr)
@@ -76,7 +77,7 @@ static struct FileList* getFiles(char const* dir, char const* base, struct FileL
     }
     else if (info.type == TR_SYS_PATH_IS_FILE && info.size > 0)
     {
-        struct FileList* node = tr_new(struct FileList, 1);
+        auto* const node = tr_new0(FileList, 1);
         node->size = info.size;
         node->filename = tr_strvDup(buf);
         node->next = list;
@@ -125,14 +126,6 @@ static uint32_t bestPieceSize(uint64_t totalSize)
     return 32 * KiB; /* less than 50 meg */
 }
 
-static int builderFileCompare(void const* va, void const* vb)
-{
-    auto const* a = static_cast<tr_metainfo_builder_file const*>(va);
-    auto const* b = static_cast<tr_metainfo_builder_file const*>(vb);
-
-    return evutil_ascii_strcasecmp(a->filename, b->filename);
-}
-
 tr_metainfo_builder* tr_metaInfoBuilderCreate(char const* topFileArg)
 {
     char* const real_top = tr_sys_path_resolve(topFileArg, nullptr);
@@ -143,7 +136,7 @@ tr_metainfo_builder* tr_metaInfoBuilderCreate(char const* topFileArg)
         return nullptr;
     }
 
-    tr_metainfo_builder* ret = tr_new0(tr_metainfo_builder, 1);
+    auto* const ret = tr_new0(tr_metainfo_builder, 1);
 
     ret->top = real_top;
 
@@ -185,7 +178,10 @@ tr_metainfo_builder* tr_metaInfoBuilderCreate(char const* topFileArg)
         tr_free(tmp);
     }
 
-    qsort(ret->files, ret->fileCount, sizeof(tr_metainfo_builder_file), builderFileCompare);
+    std::sort(
+        ret->files,
+        ret->files + ret->fileCount,
+        [](auto const& a, auto const& b) { return evutil_ascii_strcasecmp(a.filename, b.filename) < 0; });
 
     tr_metaInfoBuilderSetPieceSize(ret, bestPieceSize(ret->totalSize));
 
@@ -254,7 +250,7 @@ void tr_metaInfoBuilderFree(tr_metainfo_builder* builder)
 static uint8_t* getHashInfo(tr_metainfo_builder* b)
 {
     uint32_t fileIndex = 0;
-    uint8_t* ret = tr_new0(uint8_t, SHA_DIGEST_LENGTH * b->pieceCount);
+    auto* const ret = tr_new0(uint8_t, SHA_DIGEST_LENGTH * b->pieceCount);
     uint8_t* walk = ret;
     uint64_t off = 0;
     tr_error* error = nullptr;
@@ -400,8 +396,7 @@ static void makeInfoDict(tr_variant* dict, tr_metainfo_builder* builder)
         tr_variantDictAddInt(dict, TR_KEY_length, builder->files[0].size);
     }
 
-    char* const base = tr_sys_path_basename(builder->top, nullptr);
-    if (base != nullptr)
+    if (auto* const base = tr_sys_path_basename(builder->top, nullptr); base != nullptr)
     {
         tr_variantDictAddStr(dict, TR_KEY_name, base);
         tr_free(base);
@@ -409,8 +404,7 @@ static void makeInfoDict(tr_variant* dict, tr_metainfo_builder* builder)
 
     tr_variantDictAddInt(dict, TR_KEY_piece_length, builder->pieceSize);
 
-    uint8_t* const pch = getHashInfo(builder);
-    if (pch != nullptr)
+    if (auto* const pch = getHashInfo(builder); pch != nullptr)
     {
         tr_variantDictAddRaw(dict, TR_KEY_pieces, pch, SHA_DIGEST_LENGTH * builder->pieceCount);
         tr_free(pch);
@@ -589,7 +583,7 @@ void tr_makeMetaInfo(
     }
     else
     {
-        builder->outputFile = tr_strdup_printf("%s.torrent", builder->top);
+        builder->outputFile = tr_strvDup(tr_strvJoin(builder->top, ".torrent"sv));
     }
 
     /* enqueue the builder */

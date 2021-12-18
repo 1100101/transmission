@@ -15,25 +15,24 @@
 #define TR_NAME "Transmission"
 
 #include <array>
+#include <cstddef> // size_t
+#include <cstdint> // uintX_t
 #include <cstring> // memcmp()
+#include <ctime>
 #include <list>
-#include <mutex>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
 
-#include <event2/util.h> // evutil_ascii_strncasecmp()
-
 #include "transmission.h"
 
-#include "bandwidth.h"
+#include "crypto-utils.h"
 #include "net.h"
-#include "rpc-server.h"
 #include "tr-macros.h"
-#include "utils.h" // tr_speed_K
 
 enum tr_auto_switch_state_t
 {
@@ -48,6 +47,8 @@ struct event_base;
 struct evdns_base;
 
 class tr_bitfield;
+class tr_rpc_server;
+struct Bandwidth;
 struct tr_address;
 struct tr_announcer;
 struct tr_announcer_udp;
@@ -105,32 +106,6 @@ struct CompareHash
     }
 };
 
-struct CaseInsensitiveStringCompare // case-insensitive string compare
-{
-    int compare(std::string_view a, std::string_view b) const // <=>
-    {
-        auto const alen = std::size(a);
-        auto const blen = std::size(b);
-
-        if (auto i = evutil_ascii_strncasecmp(std::data(a), std::data(b), std::min(alen, blen)); i != 0)
-        {
-            return i;
-        }
-
-        if (alen != blen)
-        {
-            return alen < blen ? -1 : 1;
-        }
-
-        return 0;
-    }
-
-    bool operator()(std::string_view a, std::string_view b) const // less than
-    {
-        return compare(a, b) < 0;
-    }
-};
-
 /** @brief handle to an active libtransmission session */
 struct tr_session
 {
@@ -143,6 +118,37 @@ public:
     bool isClosing() const
     {
         return is_closing_;
+    }
+
+    [[nodiscard]] auto const* getTorrent(uint8_t const* info_dict_hash) const
+    {
+        auto& src = this->torrentsByHash;
+        auto it = src.find(info_dict_hash);
+        return it == std::end(src) ? nullptr : it->second;
+    }
+
+    [[nodiscard]] auto* getTorrent(uint8_t const* info_dict_hash)
+    {
+        auto& src = this->torrentsByHash;
+        auto it = src.find(info_dict_hash);
+        return it == std::end(src) ? nullptr : it->second;
+    }
+
+    [[nodiscard]] auto getTorrent(tr_sha1_digest_t const& info_dict_hash)
+    {
+        return this->getTorrent(reinterpret_cast<uint8_t const*>(std::data(info_dict_hash)));
+    }
+
+    [[nodiscard]] auto getTorrent(std::string_view info_dict_hash_string)
+    {
+        auto info_dict_hash = std::array<uint8_t, TR_SHA1_DIGEST_LEN>{};
+        tr_hex_to_sha1(std::data(info_dict_hash), std::data(info_dict_hash_string));
+        return this->getTorrent(std::data(info_dict_hash));
+    }
+
+    [[nodiscard]] auto contains(uint8_t const* info_dict_hash) const
+    {
+        return getTorrent(info_dict_hash) != nullptr;
     }
 
     // download dir
@@ -222,25 +228,13 @@ public:
 
     // RPC
 
-    void setRpcWhitelist(std::string_view whitelist)
-    {
-        tr_rpcSetWhitelist(this->rpc_server_.get(), whitelist);
-    }
+    void setRpcWhitelist(std::string_view whitelist) const;
 
-    std::string const& rpcWhitelist() const
-    {
-        return tr_rpcGetWhitelist(this->rpc_server_.get());
-    }
+    std::string const& rpcWhitelist() const;
 
-    void useRpcWhitelist(bool enabled)
-    {
-        tr_rpcSetWhitelistEnabled(this->rpc_server_.get(), enabled);
-    }
+    void useRpcWhitelist(bool enabled) const;
 
-    bool useRpcWhitelist() const
-    {
-        return tr_rpcGetWhitelistEnabled(this->rpc_server_.get());
-    }
+    bool useRpcWhitelist() const;
 
     // peer networking
 
@@ -341,7 +335,6 @@ public:
     std::unordered_set<tr_torrent*> torrents;
     std::map<int, tr_torrent*> torrentsById;
     std::map<uint8_t const*, tr_torrent*, CompareHash> torrentsByHash;
-    std::map<std::string_view, tr_torrent*, CaseInsensitiveStringCompare> torrentsByHashString;
 
     char* configDir;
     char* resumeDir;
@@ -445,31 +438,6 @@ constexpr bool tr_isPriority(tr_priority_t p)
 /***
 ****
 ***/
-
-static inline unsigned int toSpeedBytes(unsigned int KBps)
-{
-    return KBps * tr_speed_K;
-}
-
-static inline double toSpeedKBps(unsigned int Bps)
-{
-    return Bps / (double)tr_speed_K;
-}
-
-static inline uint64_t toMemBytes(unsigned int MB)
-{
-    uint64_t B = (uint64_t)tr_mem_K * tr_mem_K;
-    B *= MB;
-    return B;
-}
-
-static inline int toMemMB(uint64_t B)
-{
-    return (int)(B / (tr_mem_K * tr_mem_K));
-}
-
-/**
-**/
 
 unsigned int tr_sessionGetSpeedLimit_Bps(tr_session const*, tr_direction);
 unsigned int tr_sessionGetPieceSpeed_Bps(tr_session const*, tr_direction);

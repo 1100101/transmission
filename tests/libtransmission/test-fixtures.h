@@ -8,22 +8,23 @@
 
 #pragma once
 
+#include <chrono>
+#include <cstdlib> // getenv()
+#include <cstring> // strlen()
+#include <memory>
+#include <mutex> // std::once_flag()
+#include <string>
+#include <thread>
+
 #include "crypto-utils.h" // tr_base64_decode_str()
 #include "error.h"
 #include "file.h" // tr_sys_file_*()
-#include "quark.h"
 #include "platform.h" // TR_PATH_DELIMITER
-#include "trevent.h" // tr_amInEventThread()
+#include "quark.h"
 #include "torrent.h"
+#include "trevent.h" // tr_amInEventThread()
+#include "utils.h"
 #include "variant.h"
-
-#include <chrono>
-#include <cstring> // strlen()
-#include <memory>
-#include <thread>
-#include <mutex> // std::once_flag()
-#include <string>
-#include <cstdlib> // getenv()
 
 #include "gtest/gtest.h"
 
@@ -394,13 +395,12 @@ protected:
 
     void zeroTorrentPopulate(tr_torrent* tor, bool complete)
     {
-        for (tr_file_index_t i = 0; i < tor->info.fileCount; ++i)
+        for (size_t i = 0, n = tr_torrentFileCount(tor); i < n; ++i)
         {
-            auto const& file = tor->info.files[i];
+            auto const file = tr_torrentFile(tor, i);
 
-            auto path = (!complete && i == 0) ?
-                makeString(tr_strdup_printf("%s%c%s.part", tor->currentDir, TR_PATH_DELIMITER, file.name)) :
-                makeString(tr_strdup_printf("%s%c%s", tor->currentDir, TR_PATH_DELIMITER, file.name));
+            auto path = (!complete && i == 0) ? tr_strvJoin(tor->currentDir, TR_PATH_DELIMITER_STR, file.name, ".part") :
+                                                tr_strvJoin(tor->currentDir, TR_PATH_DELIMITER_STR, file.name);
 
             auto const dirname = makeString(tr_sys_path_dirname(path.c_str(), nullptr));
             tr_sys_dir_create(dirname.data(), TR_SYS_DIR_CREATE_PARENTS, 0700, nullptr);
@@ -412,7 +412,7 @@ protected:
 
             for (uint64_t j = 0; j < file.length; ++j)
             {
-                tr_sys_file_write(fd, (!complete && i == 0 && j < tor->info.pieceSize) ? "\1" : "\0", 1, nullptr, nullptr);
+                tr_sys_file_write(fd, (!complete && i == 0 && j < tor->pieceSize()) ? "\1" : "\0", 1, nullptr, nullptr);
             }
 
             tr_sys_file_close(fd, nullptr);
@@ -432,7 +432,7 @@ protected:
         }
         else
         {
-            EXPECT_EQ(tor->info.pieceSize, tr_torrentStat(tor)->leftUntilDone);
+            EXPECT_EQ(tor->pieceSize(), tr_torrentStat(tor)->leftUntilDone);
         }
     }
 

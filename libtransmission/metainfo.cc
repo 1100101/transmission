@@ -8,10 +8,11 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring>
 #include <iterator>
 #include <string_view>
 #include <vector>
+
+#include <event2/util.h> // evutil_ascii_strncasecmp()
 
 #include "transmission.h"
 
@@ -24,7 +25,6 @@
 #include "platform.h" /* tr_getTorrentDir() */
 #include "session.h"
 #include "torrent.h"
-#include "tr-assert.h"
 #include "utils.h"
 #include "variant.h"
 #include "web-utils.h"
@@ -37,18 +37,19 @@ using namespace std::literals;
 
 std::string tr_buildTorrentFilename(
     std::string_view dirname,
-    tr_info const* inf,
+    std::string_view name,
+    std::string_view info_hash_string,
     enum tr_metainfo_basename_format format,
     std::string_view suffix)
 {
     return format == TR_METAINFO_BASENAME_NAME_AND_PARTIAL_HASH ?
-        tr_strvJoin(dirname, "/"sv, inf->name, "."sv, std::string_view{ inf->hashString, 16 }, suffix) :
-        tr_strvJoin(dirname, "/"sv, inf->hashString, suffix);
+        tr_strvJoin(dirname, "/"sv, name, "."sv, info_hash_string.substr(0, 16), suffix) :
+        tr_strvJoin(dirname, "/"sv, info_hash_string, suffix);
 }
 
 static std::string getTorrentFilename(tr_session const* session, tr_info const* inf, enum tr_metainfo_basename_format format)
 {
-    return tr_buildTorrentFilename(tr_getTorrentDir(session), inf, format, ".torrent"sv);
+    return tr_buildTorrentFilename(tr_getTorrentDir(session), inf->name, inf->hashString, format, ".torrent"sv);
 }
 
 /***
@@ -223,7 +224,7 @@ static char const* parseFiles(tr_info* inf, tr_variant* files, tr_variant const*
         inf->isFolder = false;
         inf->fileCount = 1;
         inf->files = tr_new0(tr_file, 1);
-        inf->files[0].name = tr_strndup(root_name.c_str(), std::size(root_name));
+        inf->files[0].name = tr_strvDup(root_name);
         inf->files[0].length = len;
         inf->files[0].priv.is_renamed = is_root_adjusted;
         inf->totalSize += len;
@@ -236,121 +237,43 @@ static char const* parseFiles(tr_info* inf, tr_variant* files, tr_variant const*
     return errstr;
 }
 
-static char* tr_convertAnnounceToScrape(std::string_view url)
-{
-    char* scrape = nullptr;
-
-    /* To derive the scrape URL use the following steps:
-     * Begin with the announce URL. Find the last '/' in it.
-     * If the text immediately following that '/' isn't 'announce'
-     * it will be taken as a sign that that tracker doesn't support
-     * the scrape convention. If it does, substitute 'scrape' for
-     * 'announce' to find the scrape page. */
-
-    auto constexpr oldval = "/announce"sv;
-    auto pos = url.rfind(oldval.front());
-    if (pos != url.npos && url.find(oldval, pos) == pos)
-    {
-        auto constexpr newval = "/scrape"sv;
-        auto const prefix = url.substr(0, pos);
-        auto const suffix = url.substr(pos + std::size(oldval));
-        auto const n = std::size(prefix) + std::size(newval) + std::size(suffix);
-        scrape = tr_new(char, n + 1);
-        auto* walk = scrape;
-        walk = std::copy(std::begin(prefix), std::end(prefix), walk);
-        walk = std::copy(std::begin(newval), std::end(newval), walk);
-        walk = std::copy(std::begin(suffix), std::end(suffix), walk);
-        *walk = '\0';
-        TR_ASSERT(scrape + n == walk);
-    }
-    // some torrents with UDP announce URLs don't have /announce
-    else if (url.find("udp:"sv) == 0)
-    {
-        scrape = tr_strvDup(url);
-    }
-
-    return scrape;
-}
-
 static char const* getannounce(tr_info* inf, tr_variant* meta)
 {
-    tr_tracker_info* trackers = nullptr;
-    int trackerCount = 0;
+    inf->announce_list = std::make_shared<tr_announce_list>();
+
+    // tr_tracker_info* trackers = nullptr;
+    // int trackerCount = 0;
     auto url = std::string_view{};
 
     /* Announce-list */
     tr_variant* tiers = nullptr;
     if (tr_variantDictFindList(meta, TR_KEY_announce_list, &tiers))
     {
-        int const numTiers = tr_variantListSize(tiers);
-        int n = 0;
-
-        for (int i = 0; i < numTiers; i++)
+        for (size_t i = 0, in = tr_variantListSize(tiers); i < in; ++i)
         {
-            n += tr_variantListSize(tr_variantListChild(tiers, i));
-        }
-
-        trackers = tr_new0(tr_tracker_info, n);
-
-        int validTiers = 0;
-        for (int i = 0; i < numTiers; ++i)
-        {
-            tr_variant* tier = tr_variantListChild(tiers, i);
-            int const tierSize = tr_variantListSize(tier);
-            bool anyAdded = false;
-
-            for (int j = 0; j < tierSize; j++)
+            tr_variant* tier_list = tr_variantListChild(tiers, i);
+            if (tier_list == nullptr)
             {
-                if (tr_variantGetStrView(tr_variantListChild(tier, j), &url))
+                continue;
+            }
+
+            for (size_t j = 0, jn = tr_variantListSize(tier_list); j < jn; ++j)
+            {
+                if (!tr_variantGetStrView(tr_variantListChild(tier_list, j), &url))
                 {
-                    url = tr_strvStrip(url);
-
-                    if (tr_urlIsValidTracker(url))
-                    {
-                        tr_tracker_info* t = trackers + trackerCount;
-                        t->tier = validTiers;
-                        t->announce = tr_strvDup(url);
-                        t->scrape = tr_convertAnnounceToScrape(url);
-                        t->id = trackerCount;
-
-                        anyAdded = true;
-                        ++trackerCount;
-                    }
+                    continue;
                 }
-            }
 
-            if (anyAdded)
-            {
-                ++validTiers;
+                inf->announce_list->add(i, url);
             }
-        }
-
-        /* did we use any of the tiers? */
-        if (trackerCount == 0)
-        {
-            tr_free(trackers);
-            trackers = nullptr;
         }
     }
 
     /* Regular announce value */
-    if (trackerCount == 0 && tr_variantDictFindStrView(meta, TR_KEY_announce, &url))
+    if (std::empty(*inf->announce_list) && tr_variantDictFindStrView(meta, TR_KEY_announce, &url))
     {
-        url = tr_strvStrip(url);
-
-        if (tr_urlIsValidTracker(url))
-        {
-            trackers = tr_new0(tr_tracker_info, 1);
-            trackers[trackerCount].tier = 0;
-            trackers[trackerCount].announce = tr_strvDup(url);
-            trackers[trackerCount].scrape = tr_convertAnnounceToScrape(url);
-            trackers[trackerCount].id = 0;
-            trackerCount++;
-        }
+        inf->announce_list->add(0, url);
     }
-
-    inf->trackers = trackers;
-    inf->trackerCount = trackerCount;
 
     return nullptr;
 }
@@ -377,7 +300,7 @@ static char* fix_webseed_url(tr_info const* inf, std::string_view url)
 
     if (inf->fileCount > 1 && !std::empty(url) && url.back() != '/')
     {
-        return tr_strdup_printf("%" TR_PRIsv "/", TR_PRIsv_ARG(url));
+        return tr_strvDup(tr_strvJoin(url, "/"sv));
     }
 
     return tr_strvDup(url);
@@ -460,19 +383,12 @@ static char const* tr_metainfoParseImpl(
             if (tr_variantDictFindStrView(d, TR_KEY_display_name, &sv))
             {
                 tr_free(inf->name);
-                tr_free(inf->originalName);
                 inf->name = tr_strvDup(sv);
-                inf->originalName = tr_strvDup(sv);
             }
 
             if (inf->name == nullptr)
             {
                 inf->name = tr_strdup(inf->hashString);
-            }
-
-            if (inf->originalName == nullptr)
-            {
-                inf->originalName = tr_strdup(inf->hashString);
             }
         }
         else // not a magnet link and has no info dict...
@@ -510,9 +426,7 @@ static char const* tr_metainfoParseImpl(
         }
 
         tr_free(inf->name);
-        tr_free(inf->originalName);
         inf->name = tr_utf8clean(sv);
-        inf->originalName = tr_strdup(inf->name);
     }
 
     /* comment */
@@ -639,34 +553,39 @@ std::optional<tr_metainfo_parsed> tr_metainfoParse(tr_session const* session, tr
 
 void tr_metainfoFree(tr_info* inf)
 {
-    for (unsigned int i = 0; i < inf->webseedCount; i++)
+    if (inf->webseeds != nullptr)
     {
-        tr_free(inf->webseeds[i]);
+        for (unsigned int i = 0; i < inf->webseedCount; i++)
+        {
+            tr_free(inf->webseeds[i]);
+        }
     }
 
-    for (tr_file_index_t ff = 0; ff < inf->fileCount; ff++)
+    if (inf->files != nullptr)
     {
-        tr_free(inf->files[ff].name);
+        for (tr_file_index_t ff = 0; ff < inf->fileCount; ff++)
+        {
+            tr_free(inf->files[ff].name);
+        }
     }
 
-    tr_free(inf->webseeds);
-    tr_free(inf->files);
     tr_free(inf->comment);
     tr_free(inf->creator);
+    tr_free(inf->files);
+    tr_free(inf->name);
     tr_free(inf->source);
     tr_free(inf->torrent);
-    tr_free(inf->originalName);
-    tr_free(inf->name);
+    tr_free(inf->webseeds);
 
-    for (unsigned int i = 0; i < inf->trackerCount; i++)
-    {
-        tr_free(inf->trackers[i].announce);
-        tr_free(inf->trackers[i].scrape);
-    }
+    inf->comment = nullptr;
+    inf->creator = nullptr;
+    inf->files = nullptr;
+    inf->name = nullptr;
+    inf->source = nullptr;
+    inf->torrent = nullptr;
+    inf->webseeds = nullptr;
 
-    tr_free(inf->trackers);
-
-    memset(inf, '\0', sizeof(tr_info));
+    inf->announce_list.reset();
 }
 
 void tr_metainfoRemoveSaved(tr_session const* session, tr_info const* inf)

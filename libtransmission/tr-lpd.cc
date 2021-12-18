@@ -53,7 +53,6 @@ using in_port_t = uint16_t; /* all missing */
 #include "tr-assert.h"
 #include "tr-lpd.h"
 #include "utils.h"
-#include "version.h"
 
 #define SIZEOF_HASH_STRING (sizeof(((struct tr_info*)0)->hashString))
 
@@ -473,9 +472,10 @@ bool tr_lpdSendAnnounce(tr_torrent const* t)
     }
 
     /* make sure the hash string is normalized, just in case */
+    auto const* const sourceHashString = t->hashString();
     for (size_t i = 0; i < TR_N_ELEMENTS(hashString); ++i)
     {
-        hashString[i] = toupper(t->info.hashString[i]);
+        hashString[i] = toupper(sourceHashString[i]);
     }
 
     /* prepare a zero-terminated announce message */
@@ -557,9 +557,9 @@ static int tr_lpdConsiderAnnounce(tr_pex* peer, char const* const msg)
             return res;
         }
 
-        tor = tr_torrentFindFromHashString(session, hashString);
+        tor = session->getTorrent(hashString);
 
-        if (tr_isTorrent(tor) && tr_torrentAllowsLPD(tor))
+        if (tr_isTorrent(tor) && tor->allowsLpd())
         {
             /* we found a suitable peer, add it to the torrent */
             tr_peerMgrAddPex(tor, TR_PEER_FROM_LPD, peer, 1);
@@ -604,7 +604,7 @@ static int tr_lpdAnnounceMore(time_t const now, int const interval)
         {
             int announcePrio = 0;
 
-            if (!tr_torrentAllowsLPD(tor))
+            if (!tor->allowsLpd())
             {
                 continue;
             }

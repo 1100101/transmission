@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib> /* bsearch() */
-#include <cstring> /* memcmp() */
 #include <optional>
 #include <vector>
 
@@ -52,8 +51,7 @@ static int readOrWriteBytes(
     int err = 0;
     bool const doWrite = ioMode >= TR_IO_WRITE;
 
-    TR_ASSERT(fileIndex < tr_torrentFileCount(tor));
-    auto const& file = tor->info.files[fileIndex];
+    auto const& file = tor->file(fileIndex);
     TR_ASSERT(file.length == 0 || fileOffset < file.length);
     TR_ASSERT(fileOffset + buflen <= file.length);
 
@@ -168,6 +166,7 @@ static int compareOffsetToFile(void const* a, void const* b)
     return 0;
 }
 
+// TODO(ckerr) migrate to fpm
 void tr_ioFindFileLocation(
     tr_torrent const* tor,
     tr_piece_index_t pieceIndex,
@@ -178,19 +177,20 @@ void tr_ioFindFileLocation(
     TR_ASSERT(tr_isTorrent(tor));
 
     uint64_t const offset = tr_pieceOffset(tor, pieceIndex, pieceOffset, 0);
-    TR_ASSERT(offset < tor->info.totalSize);
+    TR_ASSERT(offset < tor->totalSize());
 
+    auto const n_files = tor->fileCount();
     auto const* file = static_cast<tr_file const*>(
-        bsearch(&offset, tor->info.files, tor->info.fileCount, sizeof(tr_file), compareOffsetToFile));
+        bsearch(&offset, tor->info.files, n_files, sizeof(tr_file), compareOffsetToFile));
     TR_ASSERT(file != nullptr);
 
     if (file != nullptr)
     {
         *fileIndex = file - tor->info.files;
         *fileOffset = offset - file->priv.offset;
-        TR_ASSERT(*fileIndex < tor->info.fileCount);
+        TR_ASSERT(*fileIndex < n_files);
         TR_ASSERT(*fileOffset < file->length);
-        TR_ASSERT(tor->info.files[*fileIndex].priv.offset + *fileOffset == offset);
+        TR_ASSERT(tor->file(*fileIndex).priv.offset + *fileOffset == offset);
     }
 }
 
@@ -204,9 +204,8 @@ static int readOrWritePiece(
     size_t buflen)
 {
     int err = 0;
-    tr_info const* info = &tor->info;
 
-    if (pieceIndex >= tor->info.pieceCount)
+    if (pieceIndex >= tor->pieceCount())
     {
         return EINVAL;
     }
@@ -217,8 +216,8 @@ static int readOrWritePiece(
 
     while (buflen != 0 && err == 0)
     {
-        tr_file const* file = &info->files[fileIndex];
-        uint64_t const bytesThisPass = std::min(uint64_t{ buflen }, uint64_t{ file->length - fileOffset });
+        auto const& file = tor->file(fileIndex);
+        uint64_t const bytesThisPass = std::min(uint64_t{ buflen }, uint64_t{ file.length - fileOffset });
 
         err = readOrWriteBytes(tor->session, tor, ioMode, fileIndex, fileOffset, buf, bytesThisPass);
         buf += bytesThisPass;
@@ -228,7 +227,7 @@ static int readOrWritePiece(
 
         if (err != 0 && ioMode == TR_IO_WRITE && tor->error != TR_STAT_LOCAL_ERROR)
         {
-            auto const path = tr_strvPath(tor->downloadDir, file->name);
+            auto const path = tr_strvPath(tor->downloadDir, file.name);
             tr_torrentSetLocalError(tor, "%s (%s)", tr_strerror(err), path.c_str());
         }
     }
@@ -258,7 +257,7 @@ int tr_ioWrite(tr_torrent* tor, tr_piece_index_t pieceIndex, uint32_t begin, uin
 static std::optional<tr_sha1_digest_t> recalculateHash(tr_torrent* tor, tr_piece_index_t piece)
 {
     TR_ASSERT(tor != nullptr);
-    TR_ASSERT(piece < tor->info.pieceCount);
+    TR_ASSERT(piece < tor->pieceCount());
 
     auto bytes_left = size_t{ tor->pieceSize(piece) };
     auto offset = uint32_t{};

@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <map>
+#include <string_view>
 
 #include <windows.h>
 
@@ -148,6 +150,20 @@ static wchar_t** to_wide_env(std::map<std::string_view, std::string_view> const&
     qsort(wide_env, part_count, sizeof(wchar_t*), &compare_env_part_names);
 
     return wide_env;
+}
+
+static void tr_free_ptrv(void* const* p)
+{
+    if (p == nullptr)
+    {
+        return;
+    }
+
+    while (*p != nullptr)
+    {
+        tr_free(*p);
+        ++p;
+    }
 }
 
 static bool create_env_block(std::map<std::string_view, std::string_view> const& env, wchar_t** env_block, tr_error** error)

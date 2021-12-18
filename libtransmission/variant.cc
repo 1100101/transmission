@@ -17,9 +17,10 @@
 
 #include <algorithm> // std::sort
 #include <cerrno>
-#include <stack>
 #include <cstdlib> /* strtod() */
 #include <cstring>
+#include <stack>
+#include <string_view>
 #include <vector>
 
 #ifdef _WIN32
@@ -1020,7 +1021,7 @@ static void tr_variantListCopy(tr_variant* target, tr_variant const* src)
     int i = 0;
     tr_variant const* val = nullptr;
 
-    while ((val = tr_variantListChild((tr_variant*)src, i)) != nullptr)
+    while ((val = tr_variantListChild(const_cast<tr_variant*>(src), i)) != nullptr)
     {
         if (tr_variantIsBool(val))
         {
@@ -1097,12 +1098,12 @@ void tr_variantMergeDicts(tr_variant* target, tr_variant const* source)
     {
         auto key = tr_quark{};
         tr_variant* val = nullptr;
-        if (tr_variantDictChild((tr_variant*)source, i, &key, &val))
+        if (tr_variantDictChild(const_cast<tr_variant*>(source), i, &key, &val))
         {
             tr_variant* t = nullptr;
 
             // if types differ, ensure that target will overwrite source
-            tr_variant* const target_child = tr_variantDictFind(target, key);
+            auto const* const target_child = tr_variantDictFind(target, key);
             if (target_child && !tr_variantIsType(target_child, val->type))
             {
                 tr_variantDictRemove(target, key);
@@ -1207,16 +1208,21 @@ char* tr_variantToStr(tr_variant const* v, tr_variant_fmt fmt, size_t* len)
 
 int tr_variantToFile(tr_variant const* v, tr_variant_fmt fmt, char const* filename)
 {
+    auto error_code = int{ 0 };
     auto contents_len = size_t{};
-    auto const* contents = tr_variantToStr(v, fmt, &contents_len);
+    auto* const contents = tr_variantToStr(v, fmt, &contents_len);
+
     tr_error* error = nullptr;
-    auto const saved = tr_saveFile(filename, { contents, contents_len }, &error);
+    tr_saveFile(filename, { contents, contents_len }, &error);
     if (error != nullptr)
     {
         tr_logAddError(_("Error saving \"%s\": %s (%d)"), filename, error->message, error->code);
+        error_code = error->code;
         tr_error_clear(&error);
     }
-    return saved ? 0 : -1;
+
+    tr_free(contents);
+    return error_code;
 }
 
 /***

@@ -64,6 +64,18 @@
 #define TR_UNLIKELY(x) (x)
 #endif
 
+#define TR_DISABLE_COPY(Class) \
+    Class(Class const&) = delete; \
+    Class& operator=(Class const&) = delete;
+
+#define TR_DISABLE_MOVE(Class) \
+    Class(Class&&) = delete; \
+    Class& operator=(Class&&) = delete;
+
+#define TR_DISABLE_COPY_MOVE(Class) \
+    TR_DISABLE_COPY(Class) \
+    TR_DISABLE_MOVE(Class)
+
 /***
 ****
 ***/
@@ -119,8 +131,6 @@
 #define TR_INET6_ADDRSTRLEN 46
 
 #define TR_ADDRSTRLEN 64
-
-#define TR_BAD_SIZE ((size_t)-1)
 
 // Mostly to enforce better formatting
 #define TR_ARG_TUPLE(...) __VA_ARGS__

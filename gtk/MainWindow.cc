@@ -20,8 +20,6 @@
  * DEALINGS IN THE SOFTWARE.
  *****************************************************************************/
 
-#include <string.h> /* strlen() */
-
 #include <glibmm/i18n.h>
 
 #include <libtransmission/transmission.h>
@@ -42,6 +40,8 @@ class MainWindow::Impl
 public:
     Impl(MainWindow& window, Glib::RefPtr<Gio::ActionGroup> const& actions, Glib::RefPtr<Session> const& core);
     ~Impl();
+
+    TR_DISABLE_COPY_MOVE(Impl)
 
     Glib::RefPtr<Gtk::TreeSelection> get_selection() const;
 
@@ -142,7 +142,7 @@ Gtk::TreeView* MainWindow::Impl::makeview(Glib::RefPtr<Gtk::TreeModel> const& mo
 
     selection_ = view->get_selection();
 
-    column_ = new Gtk::TreeViewColumn();
+    column_ = Gtk::make_managed<Gtk::TreeViewColumn>();
     column_->set_title(_("Torrent"));
     column_->set_resizable(true);
     column_->set_sizing(Gtk::TREE_VIEW_COLUMN_FIXED);
@@ -594,7 +594,7 @@ MainWindow::Impl::Impl(MainWindow& window, Glib::RefPtr<Gio::ActionGroup> const&
 
     tr_sessionSetAltSpeedFunc(
         core_->get_session(),
-        [](tr_session* /*s*/, bool /*isEnabled*/, bool /*byUser*/, void* p)
+        [](tr_session* /*s*/, bool /*isEnabled*/, bool /*byUser*/, gpointer p)
         { Glib::signal_idle().connect_once([p]() { static_cast<Impl*>(p)->onAltSpeedToggledIdle(); }); },
         this);
 

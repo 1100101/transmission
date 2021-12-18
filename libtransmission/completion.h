@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstddef> // size_t
 #include <optional>
 #include <vector>
 
@@ -79,11 +80,6 @@ struct tr_completion
 
     [[nodiscard]] uint64_t hasValid() const;
 
-    [[nodiscard]] bool isDone() const
-    {
-        return hasMetainfo() && leftUntilDone() == 0;
-    }
-
     [[nodiscard]] uint64_t leftUntilDone() const;
 
     [[nodiscard]] constexpr double percentComplete() const
@@ -147,11 +143,11 @@ private:
 
     tr_bitfield blocks_{ 0 };
 
-    // Number of bytes we'll have when done downloading. [0..info.totalSize]
+    // Number of bytes we'll have when done downloading. [0..totalSize]
     // Mutable because lazy-calculated
     mutable std::optional<uint64_t> size_when_done_;
 
-    // Number of verified bytes we have right now. [0..info.totalSize]
+    // Number of verified bytes we have right now. [0..totalSize]
     // Mutable because lazy-calculated
     mutable std::optional<uint64_t> has_valid_;
 
