@@ -2026,7 +2026,7 @@ static void sessionLoadTorrents(void* vdata)
     tr_ctorSetSave(data->ctor, false); /* since we already have them */
 
     tr_sys_path_info info;
-    char const* dirname = tr_getTorrentDir(data->session);
+    char const* const dirname = tr_getTorrentDir(data->session);
     tr_sys_dir_t odir = (tr_sys_path_get_info(dirname, 0, &info, nullptr) && info.type == TR_SYS_PATH_IS_DIRECTORY) ?
         tr_sys_dir_open(dirname, nullptr) :
         TR_BAD_SYS_DIR;
@@ -2034,21 +2034,22 @@ static void sessionLoadTorrents(void* vdata)
     auto torrents = std::list<tr_torrent*>{};
     if (odir != TR_BAD_SYS_DIR)
     {
-        char const* name = nullptr;
         auto const dirname_sv = std::string_view{ dirname };
         auto path = std::string{};
+
+        char const* name = nullptr;
         while ((name = tr_sys_dir_read_name(odir, nullptr)) != nullptr)
         {
-            if (tr_str_has_suffix(name, ".torrent"))
+            if (!tr_str_has_suffix(name, ".torrent"))
             {
-                tr_buildBuf(path, dirname_sv, "/", name);
-                tr_ctorSetMetainfoFromFile(data->ctor, path.c_str());
+                continue;
+            }
 
-                tr_torrent* const tor = tr_torrentNew(data->ctor, nullptr, nullptr);
-                if (tor != nullptr)
-                {
-                    torrents.push_back(tor);
-                }
+            tr_buildBuf(path, dirname_sv, "/", name);
+            tr_ctorSetMetainfoFromFile(data->ctor, path.c_str(), nullptr);
+            if (tr_torrent* const tor = tr_torrentNew(data->ctor, nullptr); tor != nullptr)
+            {
+                torrents.push_back(tor);
             }
         }
 
@@ -2834,12 +2835,12 @@ void tr_sessionAddTorrent(tr_session* session, tr_torrent* tor)
 {
     session->torrents.insert(tor);
     session->torrentsById.insert_or_assign(tor->uniqueId, tor);
-    session->torrentsByHash.insert_or_assign(tor->info.hash, tor);
+    session->torrentsByHash.insert_or_assign(tor->infoHash(), tor);
 }
 
 void tr_sessionRemoveTorrent(tr_session* session, tr_torrent* tor)
 {
     session->torrents.erase(tor);
     session->torrentsById.erase(tor->uniqueId);
-    session->torrentsByHash.erase(tor->info.hash);
+    session->torrentsByHash.erase(tor->infoHash());
 }

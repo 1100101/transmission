@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <iterator>
 #include <string_view>
 #include <vector>
@@ -56,11 +57,9 @@ static std::string getTorrentFilename(tr_session const* session, tr_info const* 
 ****
 ***/
 
-bool tr_metainfoAppendSanitizedPathComponent(std::string& out, std::string_view in, bool* is_adjusted)
+bool tr_metainfoAppendSanitizedPathComponent(std::string& out, std::string_view in)
 {
     auto const original_out_len = std::size(out);
-    auto const original_in = in;
-    *is_adjusted = false;
 
     // remove leading spaces
     auto constexpr leading_test = [](auto ch)
@@ -108,16 +107,14 @@ bool tr_metainfoAppendSanitizedPathComponent(std::string& out, std::string_view 
         break;
     }
 
-    *is_adjusted = original_in != std::string_view{ out.c_str() + original_out_len };
     return std::size(out) > original_out_len;
 }
 
-static bool getfile(char** setme, bool* is_adjusted, std::string_view root, tr_variant* path, std::string& buf)
+static bool getfile(char** setme, std::string_view root, tr_variant* path, std::string& buf)
 {
     bool success = false;
 
     *setme = nullptr;
-    *is_adjusted = false;
 
     if (tr_variantIsList(path))
     {
@@ -134,16 +131,13 @@ static bool getfile(char** setme, bool* is_adjusted, std::string_view root, tr_v
                 break;
             }
 
-            auto is_component_adjusted = bool{};
             auto const pos = std::size(buf);
-            if (!tr_metainfoAppendSanitizedPathComponent(buf, raw, &is_component_adjusted))
+            if (!tr_metainfoAppendSanitizedPathComponent(buf, raw))
             {
                 continue;
             }
 
             buf.insert(std::begin(buf) + pos, TR_PATH_DELIMITER);
-
-            *is_adjusted |= is_component_adjusted;
         }
     }
 
@@ -155,7 +149,6 @@ static bool getfile(char** setme, bool* is_adjusted, std::string_view root, tr_v
     if (success)
     {
         *setme = tr_utf8clean(buf);
-        *is_adjusted |= buf != *setme;
     }
 
     return success;
@@ -166,9 +159,8 @@ static char const* parseFiles(tr_info* inf, tr_variant* files, tr_variant const*
     int64_t len = 0;
     inf->totalSize = 0;
 
-    bool is_root_adjusted = false;
     auto root_name = std::string{};
-    if (!tr_metainfoAppendSanitizedPathComponent(root_name, inf->name, &is_root_adjusted))
+    if (!tr_metainfoAppendSanitizedPathComponent(root_name, inf->name))
     {
         return "path";
     }
@@ -201,8 +193,7 @@ static char const* parseFiles(tr_info* inf, tr_variant* files, tr_variant const*
                 break;
             }
 
-            bool is_file_adjusted = false;
-            if (!getfile(&inf->files[i].name, &is_file_adjusted, root_name, path, buf))
+            if (!getfile(&inf->files[i].name, root_name, path, buf))
             {
                 errstr = "path";
                 break;
@@ -215,7 +206,6 @@ static char const* parseFiles(tr_info* inf, tr_variant* files, tr_variant const*
             }
 
             inf->files[i].length = len;
-            inf->files[i].priv.is_renamed = is_root_adjusted || is_file_adjusted;
             inf->totalSize += len;
         }
     }
@@ -226,7 +216,6 @@ static char const* parseFiles(tr_info* inf, tr_variant* files, tr_variant const*
         inf->files = tr_new0(tr_file, 1);
         inf->files[0].name = tr_strvDup(root_name);
         inf->files[0].length = len;
-        inf->files[0].priv.is_renamed = is_root_adjusted;
         inf->totalSize += len;
     }
     else
@@ -371,13 +360,13 @@ static char const* tr_metainfoParseImpl(
                 return "info_hash";
             }
 
-            if (std::size(sv) != SHA_DIGEST_LENGTH)
+            if (std::size(sv) != std::size(inf->hash))
             {
                 return "info_hash";
             }
 
-            std::copy(std::begin(sv), std::end(sv), inf->hash);
-            tr_sha1_to_hex(inf->hashString, inf->hash);
+            (void)memcpy(std::data(inf->hash), std::data(sv), std::size(sv));
+            tr_sha1_to_string(inf->hash, inf->hashString);
 
             // maybe get the display name
             if (tr_variantDictFindStrView(d, TR_KEY_display_name, &sv))
@@ -398,17 +387,20 @@ static char const* tr_metainfoParseImpl(
     }
     else
     {
-        size_t blen = 0;
-        char* bstr = tr_variantToStr(infoDict, TR_VARIANT_FMT_BENC, &blen);
-        tr_sha1(inf->hash, bstr, (int)blen, nullptr);
-        tr_sha1_to_hex(inf->hashString, inf->hash);
+        auto const benc = tr_variantToStr(infoDict, TR_VARIANT_FMT_BENC);
+        auto const hash = tr_sha1(benc);
+        if (!hash)
+        {
+            return "hash";
+        }
+
+        inf->hash = *hash;
+        tr_sha1_to_string(inf->hash, inf->hashString);
 
         if (infoDictLength != nullptr)
         {
-            *infoDictLength = blen;
+            *infoDictLength = std::size(benc);
         }
-
-        tr_free(bstr);
     }
 
     /* name */
@@ -489,12 +481,12 @@ static char const* tr_metainfoParseImpl(
             return "pieces";
         }
 
-        if (std::size(sv) % SHA_DIGEST_LENGTH != 0)
+        if (std::size(sv) % std::size(tr_sha1_digest_t{}) != 0)
         {
             return "pieces";
         }
 
-        auto const n_pieces = std::size(sv) / SHA_DIGEST_LENGTH;
+        auto const n_pieces = std::size(sv) / std::size(tr_sha1_digest_t{});
         inf->pieceCount = n_pieces;
         pieces->resize(n_pieces);
         std::copy_n(std::data(sv), std::size(sv), reinterpret_cast<uint8_t*>(std::data(*pieces)));
@@ -543,7 +535,7 @@ std::optional<tr_metainfo_parsed> tr_metainfoParse(tr_session const* session, tr
     char const* bad_tag = tr_metainfoParseImpl(session, &out.info, &out.pieces, &out.info_dict_length, meta_in);
     if (bad_tag != nullptr)
     {
-        tr_error_set(error, TR_ERROR_EINVAL, _("Error parsing metainfo: %s"), bad_tag);
+        tr_error_set(error, TR_ERROR_EINVAL, tr_strvJoin("Error parsing metainfo: "sv, bad_tag));
         tr_metainfoFree(&out.info);
         return {};
     }

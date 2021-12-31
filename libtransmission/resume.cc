@@ -38,7 +38,12 @@ constexpr int MAX_REMEMBERED_PEERS = 200;
 
 static std::string getResumeFilename(tr_torrent const* tor, enum tr_metainfo_basename_format format)
 {
-    return tr_buildTorrentFilename(tr_getResumeDir(tor->session), tr_torrentName(tor), tor->hashString(), format, ".resume"sv);
+    return tr_buildTorrentFilename(
+        tr_getResumeDir(tor->session),
+        tr_torrentName(tor),
+        tor->infoHashString(),
+        format,
+        ".resume"sv);
 }
 
 /***
@@ -383,11 +388,7 @@ static uint64_t loadName(tr_variant* dict, tr_torrent* tor)
         return 0;
     }
 
-    if (name != tr_torrentName(tor))
-    {
-        tr_free(tor->info.name);
-        tor->info.name = tr_strvDup(name);
-    }
+    tor->setName(name);
 
     return TR_FR_NAME;
 }
@@ -399,23 +400,10 @@ static uint64_t loadName(tr_variant* dict, tr_torrent* tor)
 static void saveFilenames(tr_variant* dict, tr_torrent const* tor)
 {
     auto const n = tor->fileCount();
-
-    bool any_renamed = false;
-
-    for (tr_file_index_t i = 0; !any_renamed && i < n; ++i)
+    tr_variant* const list = tr_variantDictAddList(dict, TR_KEY_files, n);
+    for (tr_file_index_t i = 0; i < n; ++i)
     {
-        any_renamed = tor->file(i).priv.is_renamed;
-    }
-
-    if (any_renamed)
-    {
-        tr_variant* list = tr_variantDictAddList(dict, TR_KEY_files, n);
-
-        for (tr_file_index_t i = 0; i < n; ++i)
-        {
-            auto const& file = tor->file(i);
-            tr_variantListAddStrView(list, file.priv.is_renamed ? file.name : "");
-        }
+        tr_variantListAddStrView(list, tor->file(i).name);
     }
 }
 
@@ -432,12 +420,11 @@ static uint64_t loadFilenames(tr_variant* dict, tr_torrent* tor)
     for (size_t i = 0; i < n_files && i < n_list; ++i)
     {
         auto sv = std::string_view{};
-        if (tr_variantGetStrView(tr_variantListChild(list, i), &sv) && !std::empty(sv))
+        auto& file = tor->file(i);
+        if (tr_variantGetStrView(tr_variantListChild(list, i), &sv) && !std::empty(sv) && sv != file.name)
         {
-            auto& file = tor->file(i);
             tr_free(file.name);
             file.name = tr_strvDup(sv);
-            file.priv.is_renamed = true;
         }
     }
 
@@ -481,16 +468,17 @@ static void rawToBitfield(tr_bitfield& bitfield, uint8_t const* raw, size_t rawl
     }
 }
 
-static void saveProgress(tr_variant* dict, tr_torrent* tor)
+static void saveProgress(tr_variant* dict, tr_torrent const* tor)
 {
     tr_variant* const prog = tr_variantDictAddDict(dict, TR_KEY_progress, 4);
 
     // add the mtimes
-    auto const n = tor->fileCount();
+    auto const& mtimes = tor->file_mtimes_;
+    auto const n = std::size(mtimes);
     tr_variant* const l = tr_variantDictAddList(prog, TR_KEY_mtimes, n);
-    for (tr_file_index_t i = 0; i < n; ++i)
+    for (auto const& mtime : mtimes)
     {
-        tr_variantListAddInt(l, tor->file(i).priv.mtime);
+        tr_variantListAddInt(l, mtime);
     }
 
     // add the 'checked pieces' bitfield
@@ -678,11 +666,11 @@ void tr_torrentSaveResume(tr_torrent* tor)
     tr_variantDictAddInt(&top, TR_KEY_added_date, tor->addedDate);
     tr_variantDictAddInt(&top, TR_KEY_corrupt, tor->corruptPrev + tor->corruptCur);
     tr_variantDictAddInt(&top, TR_KEY_done_date, tor->doneDate);
-    tr_variantDictAddStrView(&top, TR_KEY_destination, tor->downloadDir);
+    tr_variantDictAddQuark(&top, TR_KEY_destination, tor->downloadDir().quark());
 
-    if (tor->incompleteDir != nullptr)
+    if (!std::empty(tor->incompleteDir()))
     {
-        tr_variantDictAddStr(&top, TR_KEY_incomplete_dir, tor->incompleteDir);
+        tr_variantDictAddQuark(&top, TR_KEY_incomplete_dir, tor->incompleteDir().quark());
     }
 
     tr_variantDictAddInt(&top, TR_KEY_downloaded, tor->downloadedPrev + tor->downloadedCur);
@@ -710,7 +698,7 @@ void tr_torrentSaveResume(tr_torrent* tor)
     int const err = tr_variantToFile(&top, TR_VARIANT_FMT_BENC, filename.c_str());
     if (err != 0)
     {
-        tr_torrentSetLocalError(tor, "Unable to save resume file: %s", tr_strerror(err));
+        tor->setLocalError(tr_strvJoin("Unable to save resume file: ", tr_strerror(err)));
     }
 
     tr_variantFree(&top);
@@ -736,7 +724,7 @@ static uint64_t loadFromFile(tr_torrent* tor, uint64_t fieldsToLoad, bool* didRe
     std::string const filename = getResumeFilename(tor, TR_METAINFO_BASENAME_HASH);
 
     auto buf = std::vector<char>{};
-    if (!tr_loadFile(buf, filename.c_str(), &error) ||
+    if (!tr_loadFile(buf, filename, &error) ||
         !tr_variantFromBuf(
             &top,
             TR_VARIANT_PARSE_BENC | TR_VARIANT_PARSE_INPLACE,
@@ -778,13 +766,11 @@ static uint64_t loadFromFile(tr_torrent* tor, uint64_t fieldsToLoad, bool* didRe
     if ((fieldsToLoad & (TR_FR_PROGRESS | TR_FR_DOWNLOAD_DIR)) != 0 &&
         tr_variantDictFindStrView(&top, TR_KEY_destination, &sv) && !std::empty(sv))
     {
-        bool const is_current_dir = tor->currentDir == tor->downloadDir;
-        tr_free(tor->downloadDir);
-        tor->downloadDir = tr_strvDup(sv);
-
+        bool const is_current_dir = tor->current_dir == tor->download_dir;
+        tor->download_dir = sv;
         if (is_current_dir)
         {
-            tor->currentDir = tor->downloadDir;
+            tor->current_dir = sv;
         }
 
         fieldsLoaded |= TR_FR_DOWNLOAD_DIR;
@@ -793,13 +779,11 @@ static uint64_t loadFromFile(tr_torrent* tor, uint64_t fieldsToLoad, bool* didRe
     if ((fieldsToLoad & (TR_FR_PROGRESS | TR_FR_INCOMPLETE_DIR)) != 0 &&
         tr_variantDictFindStrView(&top, TR_KEY_incomplete_dir, &sv) && !std::empty(sv))
     {
-        bool const is_current_dir = tor->currentDir == tor->incompleteDir;
-        tr_free(tor->incompleteDir);
-        tor->incompleteDir = tr_strvDup(sv);
-
+        bool const is_current_dir = tor->current_dir == tor->incomplete_dir;
+        tor->incomplete_dir = sv;
         if (is_current_dir)
         {
-            tor->currentDir = tor->incompleteDir;
+            tor->current_dir = sv;
         }
 
         fieldsLoaded |= TR_FR_INCOMPLETE_DIR;
@@ -953,8 +937,7 @@ static uint64_t setFromCtor(tr_torrent* tor, uint64_t fields, tr_ctor const* cto
         if (tr_ctorGetDownloadDir(ctor, mode, &path) && !tr_str_is_empty(path))
         {
             ret |= TR_FR_DOWNLOAD_DIR;
-            tr_free(tor->downloadDir);
-            tor->downloadDir = tr_strdup(path);
+            tor->download_dir = path;
         }
     }
 

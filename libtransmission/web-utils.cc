@@ -10,6 +10,7 @@
 #include <array>
 #include <cctype>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -241,24 +242,11 @@ void tr_http_escape_sha1(char* out, uint8_t const* sha1_digest)
 namespace
 {
 
-int parsePort(std::string_view port)
+auto parsePort(std::string_view port_sv)
 {
-    auto tmp = std::array<char, 16>{};
+    auto const port = tr_parseNum<int>(port_sv);
 
-    if (std::size(port) >= std::size(tmp))
-    {
-        return -1;
-    }
-
-    std::copy(std::begin(port), std::end(port), std::begin(tmp));
-    char* end = nullptr;
-    long port_num = strtol(std::data(tmp), &end, 10);
-    if (*end != '\0' || port_num <= 0 || port_num >= 65536)
-    {
-        port_num = -1;
-    }
-
-    return int(port_num);
+    return port && *port >= std::numeric_limits<tr_port>::min() && *port <= std::numeric_limits<tr_port>::max() ? *port : -1;
 }
 
 constexpr std::string_view getPortForScheme(std::string_view scheme)
@@ -313,7 +301,7 @@ std::optional<tr_url_parsed_t> tr_urlParse(std::string_view url)
 
     if (!urlCharsAreValid(url))
     {
-        return {};
+        return std::nullopt;
     }
 
     auto parsed = tr_url_parsed_t{};
@@ -323,7 +311,7 @@ std::optional<tr_url_parsed_t> tr_urlParse(std::string_view url)
     parsed.scheme = tr_strvSep(&url, ':');
     if (std::empty(parsed.scheme))
     {
-        return {};
+        return std::nullopt;
     }
 
     // authority
@@ -370,7 +358,7 @@ std::optional<tr_url_parsed_t> tr_urlParse(std::string_view url)
 std::optional<tr_url_parsed_t> tr_urlParseTracker(std::string_view url)
 {
     auto const parsed = tr_urlParse(url);
-    return parsed && tr_isValidTrackerScheme(parsed->scheme) ? *parsed : std::optional<tr_url_parsed_t>{};
+    return parsed && tr_isValidTrackerScheme(parsed->scheme) ? std::make_optional(*parsed) : std::nullopt;
 }
 
 bool tr_urlIsValidTracker(std::string_view url)

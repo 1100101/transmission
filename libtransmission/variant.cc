@@ -1200,28 +1200,25 @@ struct evbuffer* tr_variantToBuf(tr_variant const* v, tr_variant_fmt fmt)
     return buf;
 }
 
-char* tr_variantToStr(tr_variant const* v, tr_variant_fmt fmt, size_t* len)
+std::string tr_variantToStr(tr_variant const* v, tr_variant_fmt fmt)
 {
-    struct evbuffer* buf = tr_variantToBuf(v, fmt);
-    return evbuffer_free_to_str(buf, len);
+    return evbuffer_free_to_str(tr_variantToBuf(v, fmt));
 }
 
-int tr_variantToFile(tr_variant const* v, tr_variant_fmt fmt, char const* filename)
+int tr_variantToFile(tr_variant const* v, tr_variant_fmt fmt, std::string_view filename)
 {
     auto error_code = int{ 0 };
-    auto contents_len = size_t{};
-    auto* const contents = tr_variantToStr(v, fmt, &contents_len);
+    auto const contents = tr_variantToStr(v, fmt);
 
     tr_error* error = nullptr;
-    tr_saveFile(filename, { contents, contents_len }, &error);
+    tr_saveFile(filename, { std::data(contents), std::size(contents) }, &error);
     if (error != nullptr)
     {
-        tr_logAddError(_("Error saving \"%s\": %s (%d)"), filename, error->message, error->code);
+        tr_logAddError(_("Error saving \"%" TR_PRIsv "\": %s (%d)"), TR_PRIsv_ARG(filename), error->message, error->code);
         error_code = error->code;
         tr_error_clear(&error);
     }
 
-    tr_free(contents);
     return error_code;
 }
 
@@ -1246,14 +1243,14 @@ bool tr_variantFromBuf(tr_variant* setme, int opts, std::string_view buf, char c
 
     if (err)
     {
-        tr_error_set_literal(error, EILSEQ, "error parsing encoded data");
+        tr_error_set(error, EILSEQ, "error parsing encoded data"sv);
         return false;
     }
 
     return true;
 }
 
-bool tr_variantFromFile(tr_variant* setme, tr_variant_parse_opts opts, char const* filename, tr_error** error)
+bool tr_variantFromFile(tr_variant* setme, tr_variant_parse_opts opts, std::string_view filename, tr_error** error)
 {
     // can't do inplace when this function is allocating & freeing the memory...
     TR_ASSERT((opts & TR_VARIANT_PARSE_INPLACE) == 0);

@@ -133,9 +133,9 @@ int tr_main(int argc, char* argv[])
     tr_metainfo_builder* b = nullptr;
 
     tr_logSetLevel(TR_LOG_ERROR);
-    tr_formatter_mem_init(MEM_K, MEM_K_STR, MEM_M_STR, MEM_G_STR, MEM_T_STR);
-    tr_formatter_size_init(DISK_K, DISK_K_STR, DISK_M_STR, DISK_G_STR, DISK_T_STR);
-    tr_formatter_speed_init(SPEED_K, SPEED_K_STR, SPEED_M_STR, SPEED_G_STR, SPEED_T_STR);
+    tr_formatter_mem_init(MemK, MemKStr, MemMStr, MemGStr, MemTStr);
+    tr_formatter_size_init(DiskK, DiskKStr, DiskMStr, DiskGStr, DiskTStr);
+    tr_formatter_speed_init(SpeedK, SpeedKStr, SpeedMStr, SpeedGStr, SpeedTStr);
 
     auto options = app_options{};
     if (parseCommandLine(options, argc, (char const* const*)argv) != 0)
@@ -203,15 +203,14 @@ int tr_main(int argc, char* argv[])
         tr_metaInfoBuilderSetPieceSize(b, options.piecesize_kib * KiB);
     }
 
-    char buf[128];
     printf(
         b->fileCount > 1 ? " %" PRIu32 " files, %s\n" : " %" PRIu32 " file, %s\n",
         b->fileCount,
-        tr_formatter_size_B(buf, b->totalSize, sizeof(buf)));
+        tr_formatter_size_B(b->totalSize).c_str());
     printf(
         b->pieceCount > 1 ? " %" PRIu32 " pieces, %s each\n" : " %" PRIu32 " piece, %s\n",
         b->pieceCount,
-        tr_formatter_size_B(buf, b->pieceSize, sizeof(buf)));
+        tr_formatter_size_B(b->pieceSize).c_str());
 
     tr_makeMetaInfo(
         b,

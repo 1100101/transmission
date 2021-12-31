@@ -141,7 +141,7 @@ bool trashDataFile(char const* filename, tr_error** error)
         NSError* localError;
         if (![Torrent trashFile:@(filename) error:&localError])
         {
-            tr_error_set_literal(error, localError.code, localError.description.UTF8String);
+            tr_error_set(error, localError.code, localError.description.UTF8String);
             return false;
         }
     }
@@ -1849,20 +1849,21 @@ bool trashDataFile(char const* filename, tr_error** error)
             tr_ctorSetIncompleteDir(ctor, incompleteFolder.UTF8String);
         }
 
-        tr_parse_result result = TR_PARSE_ERR;
+        bool loaded = false;
+
         if (path)
         {
-            result = static_cast<tr_parse_result>(tr_ctorSetMetainfoFromFile(ctor, path.UTF8String));
+            loaded = tr_ctorSetMetainfoFromFile(ctor, path.UTF8String, nullptr);
         }
 
-        if (result != TR_PARSE_OK && magnetAddress)
+        if (!loaded && magnetAddress)
         {
-            result = static_cast<tr_parse_result>(tr_ctorSetMetainfoFromMagnetLink(ctor, magnetAddress.UTF8String));
+            loaded = tr_ctorSetMetainfoFromMagnetLink(ctor, magnetAddress.UTF8String, nullptr);
         }
 
-        if (result == TR_PARSE_OK)
+        if (loaded)
         {
-            fHandle = tr_torrentNew(ctor, NULL, NULL);
+            fHandle = tr_torrentNew(ctor, NULL);
         }
 
         tr_ctorFree(ctor);

@@ -27,15 +27,9 @@
 #include <exception>
 #include <iterator> // std::back_inserter
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
-
-#if defined(__GNUC__) && !__has_include(<charconv>)
-#undef HAVE_CHARCONV
-#else
-#define HAVE_CHARCONV 1
-#include <charconv> // std::from_chars()
-#endif
 
 #ifdef _WIN32
 #include <ws2tcpip.h> /* WSAStartup() */
@@ -283,7 +277,7 @@ uint8_t* tr_loadFile(char const* path, size_t* size, tr_error** error)
     if (info.type != TR_SYS_PATH_IS_FILE)
     {
         tr_logAddError(err_fmt, path, _("Not a regular file"));
-        tr_error_set_literal(error, TR_ERROR_EISDIR, _("Not a regular file"));
+        tr_error_set(error, TR_ERROR_EISDIR, "Not a regular file"sv);
         return nullptr;
     }
 
@@ -318,32 +312,34 @@ uint8_t* tr_loadFile(char const* path, size_t* size, tr_error** error)
     return buf;
 }
 
-bool tr_loadFile(std::vector<char>& setme, char const* path, tr_error** error)
+bool tr_loadFile(std::vector<char>& setme, std::string_view path_sv, tr_error** error)
 {
     char const* const err_fmt = _("Couldn't read \"%1$s\": %2$s");
+    auto const path = std::string{ path_sv };
+    auto const* const path_sz = path.c_str();
 
     /* try to stat the file */
     auto info = tr_sys_path_info{};
     tr_error* my_error = nullptr;
-    if (!tr_sys_path_get_info(path, 0, &info, &my_error))
+    if (!tr_sys_path_get_info(path_sz, 0, &info, &my_error))
     {
-        tr_logAddDebug(err_fmt, path, my_error->message);
+        tr_logAddDebug(err_fmt, path_sz, my_error->message);
         tr_error_propagate(error, &my_error);
         return false;
     }
 
     if (info.type != TR_SYS_PATH_IS_FILE)
     {
-        tr_logAddError(err_fmt, path, _("Not a regular file"));
-        tr_error_set_literal(error, TR_ERROR_EISDIR, _("Not a regular file"));
+        tr_logAddError(err_fmt, path_sz, _("Not a regular file"));
+        tr_error_set(error, TR_ERROR_EISDIR, "Not a regular file"sv);
         return false;
     }
 
     /* Load the torrent file into our buffer */
-    tr_sys_file_t const fd = tr_sys_file_open(path, TR_SYS_FILE_READ | TR_SYS_FILE_SEQUENTIAL, 0, &my_error);
+    tr_sys_file_t const fd = tr_sys_file_open(path_sz, TR_SYS_FILE_READ | TR_SYS_FILE_SEQUENTIAL, 0, &my_error);
     if (fd == TR_BAD_SYS_FILE)
     {
-        tr_logAddError(err_fmt, path, my_error->message);
+        tr_logAddError(err_fmt, path_sz, my_error->message);
         tr_error_propagate(error, &my_error);
         return false;
     }
@@ -351,7 +347,7 @@ bool tr_loadFile(std::vector<char>& setme, char const* path, tr_error** error)
     setme.resize(info.size);
     if (!tr_sys_file_read(fd, std::data(setme), info.size, nullptr, &my_error))
     {
-        tr_logAddError(err_fmt, path, my_error->message);
+        tr_logAddError(err_fmt, path_sz, my_error->message);
         tr_sys_file_close(fd, nullptr);
         tr_error_propagate(error, &my_error);
         return false;
@@ -361,7 +357,7 @@ bool tr_loadFile(std::vector<char>& setme, char const* path, tr_error** error)
     return true;
 }
 
-bool tr_saveFile(char const* filename_in, std::string_view contents, tr_error** error)
+bool tr_saveFile(std::string_view filename_in, std::string_view contents, tr_error** error)
 {
     auto filename = std::string{ filename_in };
 
@@ -465,7 +461,17 @@ tr_disk_space tr_dirSpace(std::string_view dir)
 *****
 ****/
 
-char* evbuffer_free_to_str(struct evbuffer* buf, size_t* result_len)
+std::string evbuffer_free_to_str(evbuffer* buf)
+{
+    auto const n = evbuffer_get_length(buf);
+    auto ret = std::string{};
+    ret.resize(n);
+    evbuffer_copyout(buf, std::data(ret), n);
+    evbuffer_free(buf);
+    return ret;
+}
+
+static char* evbuffer_free_to_str(struct evbuffer* buf, size_t* result_len)
 {
     size_t const n = evbuffer_get_length(buf);
     auto* const ret = tr_new(char, n + 1);
@@ -562,17 +568,13 @@ char const* tr_strcasestr(char const* haystack, char const* needle)
 
 char* tr_strdup_printf(char const* fmt, ...)
 {
+    evbuffer* const buf = evbuffer_new();
+
     va_list ap;
     va_start(ap, fmt);
-    char* const ret = tr_strdup_vprintf(fmt, ap);
+    evbuffer_add_vprintf(buf, fmt, ap);
     va_end(ap);
-    return ret;
-}
 
-char* tr_strdup_vprintf(char const* fmt, va_list args)
-{
-    struct evbuffer* buf = evbuffer_new();
-    evbuffer_add_vprintf(buf, fmt, args);
     return evbuffer_free_to_str(buf, nullptr);
 }
 
@@ -1102,45 +1104,34 @@ struct number_range
  */
 static bool parseNumberSection(std::string_view str, number_range& range)
 {
-    auto const error = errno;
-    auto success = bool{};
+    auto constexpr Delimiter = "-"sv;
 
-#if defined(HAVE_CHARCONV)
-    // wants char*, so string_view::iterator don't work. make our own begin/end
-    auto const* const begin_ch = std::data(str);
-    auto const* const end_ch = begin_ch + std::size(str);
-    auto result = std::from_chars(begin_ch, end_ch, range.low);
-    success = result.ec == std::errc{};
-    if (success)
+    auto const first = tr_parseNum<size_t>(str);
+    if (!first)
     {
-        range.high = range.low;
-        if (result.ptr < end_ch && *result.ptr == '-')
-        {
-            result = std::from_chars(result.ptr + 1, end_ch, range.high);
-            success = result.ec == std::errc{};
-        }
+        return false;
     }
-#else
-    try
-    {
-        auto tmp = std::string(str);
-        auto pos = size_t{};
-        range.low = range.high = std::stoi(tmp, &pos);
-        if (pos != std::size(tmp) && tmp[pos] == '-')
-        {
-            tmp.erase(0, pos + 1);
-            range.high = std::stoi(tmp, &pos);
-        }
-        success = true;
-    }
-    catch (std::exception&)
-    {
-        success = false;
-    }
-#endif
 
-    errno = error;
-    return success;
+    range.low = range.high = *first;
+    if (std::empty(str))
+    {
+        return true;
+    }
+
+    if (!tr_strvStartsWith(str, Delimiter))
+    {
+        return false;
+    }
+
+    str.remove_prefix(std::size(Delimiter));
+    auto const second = tr_parseNum<size_t>(str);
+    if (!second)
+    {
+        return false;
+    }
+
+    range.high = *second;
+    return true;
 }
 
 /**
@@ -1190,36 +1181,37 @@ static char* tr_strtruncd(char* buf, double x, int precision, size_t buflen)
     return buf;
 }
 
-char* tr_strpercent(char* buf, double x, size_t buflen)
+std::string tr_strpercent(double x)
 {
+    auto buf = std::array<char, 64>{};
+
     if (x < 100.0)
     {
-        tr_strtruncd(buf, x, 1, buflen);
+        tr_strtruncd(std::data(buf), x, 1, std::size(buf));
     }
     else
     {
-        tr_strtruncd(buf, x, 0, buflen);
+        tr_strtruncd(std::data(buf), x, 0, std::size(buf));
     }
 
-    return buf;
+    return std::data(buf);
 }
 
-char* tr_strratio(char* buf, size_t buflen, double ratio, char const* infinity)
+std::string tr_strratio(double ratio, char const* infinity)
 {
     if ((int)ratio == TR_RATIO_NA)
     {
-        tr_strlcpy(buf, _("None"), buflen);
-    }
-    else if ((int)ratio == TR_RATIO_INF)
-    {
-        tr_strlcpy(buf, infinity, buflen);
-    }
-    else
-    {
-        tr_strpercent(buf, ratio, buflen);
+        return _("None");
     }
 
-    return buf;
+    if ((int)ratio == TR_RATIO_INF)
+    {
+        auto buf = std::array<char, 64>{};
+        tr_strlcpy(std::data(buf), infinity, std::size(buf));
+        return std::data(buf);
+    }
+
+    return tr_strpercent(ratio);
 }
 
 /***
@@ -1239,7 +1231,7 @@ bool tr_moveFile(char const* oldpath, char const* newpath, tr_error** error)
 
     if (info.type != TR_SYS_PATH_IS_FILE)
     {
-        tr_error_set_literal(error, TR_ERROR_EINVAL, "Old path does not point to a file.");
+        tr_error_set(error, TR_ERROR_EINVAL, "Old path does not point to a file."sv);
         return false;
     }
 
@@ -1429,9 +1421,10 @@ void tr_formatter_size_init(uint64_t kilo, char const* kb, char const* mb, char 
     formatter_init(size_units, kilo, kb, mb, gb, tb);
 }
 
-char* tr_formatter_size_B(char* buf, uint64_t bytes, size_t buflen)
+std::string tr_formatter_size_B(uint64_t bytes)
 {
-    return formatter_get_size_str(size_units, buf, bytes, buflen);
+    auto buf = std::array<char, 64>{};
+    return formatter_get_size_str(size_units, std::data(buf), bytes, std::size(buf));
 }
 
 static formatter_units speed_units;
@@ -1444,11 +1437,13 @@ void tr_formatter_speed_init(size_t kilo, char const* kb, char const* mb, char c
     formatter_init(speed_units, kilo, kb, mb, gb, tb);
 }
 
-char* tr_formatter_speed_KBps(char* buf, double KBps, size_t buflen)
+std::string tr_formatter_speed_KBps(double KBps)
 {
+    auto buf = std::array<char, 64>{};
+
     if (auto speed = KBps; speed <= 999.95) /* 0.0 KB to 999.9 KB */
     {
-        tr_snprintf(buf, buflen, "%d %s", (int)speed, speed_units[TR_FMT_KB].name);
+        tr_snprintf(std::data(buf), std::size(buf), "%d %s", (int)speed, speed_units[TR_FMT_KB].name);
     }
     else
     {
@@ -1458,19 +1453,19 @@ char* tr_formatter_speed_KBps(char* buf, double KBps, size_t buflen)
 
         if (speed <= 99.995) /* 0.98 MB to 99.99 MB */
         {
-            tr_snprintf(buf, buflen, "%.2f %s", speed, speed_units[TR_FMT_MB].name);
+            tr_snprintf(std::data(buf), std::size(buf), "%.2f %s", speed, speed_units[TR_FMT_MB].name);
         }
         else if (speed <= 999.95) /* 100.0 MB to 999.9 MB */
         {
-            tr_snprintf(buf, buflen, "%.1f %s", speed, speed_units[TR_FMT_MB].name);
+            tr_snprintf(std::data(buf), std::size(buf), "%.1f %s", speed, speed_units[TR_FMT_MB].name);
         }
         else
         {
-            tr_snprintf(buf, buflen, "%.1f %s", speed / K, speed_units[TR_FMT_GB].name);
+            tr_snprintf(std::data(buf), std::size(buf), "%.1f %s", speed / K, speed_units[TR_FMT_GB].name);
         }
     }
 
-    return buf;
+    return std::data(buf);
 }
 
 static formatter_units mem_units;
@@ -1483,9 +1478,10 @@ void tr_formatter_mem_init(size_t kilo, char const* kb, char const* mb, char con
     formatter_init(mem_units, kilo, kb, mb, gb, tb);
 }
 
-char* tr_formatter_mem_B(char* buf, size_t bytes_per_second, size_t buflen)
+std::string tr_formatter_mem_B(size_t bytes_per_second)
 {
-    return formatter_get_size_str(mem_units, buf, bytes_per_second, buflen);
+    auto buf = std::array<char, 64>{};
+    return formatter_get_size_str(mem_units, std::data(buf), bytes_per_second, std::size(buf));
 }
 
 void tr_formatter_get_units(void* vdict)

@@ -12,9 +12,9 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <map>
 #include <set>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 #include <event2/buffer.h>
@@ -151,11 +151,11 @@ struct StopsCompare
 
 struct tr_scrape_info
 {
-    tr_quark const scrape_url;
+    tr_interned_string scrape_url;
 
     int multiscrape_max;
 
-    tr_scrape_info(tr_quark scrape_url_in, int const multiscrape_max_in)
+    tr_scrape_info(tr_interned_string scrape_url_in, int const multiscrape_max_in)
         : scrape_url{ scrape_url_in }
         , multiscrape_max{ multiscrape_max_in }
     {
@@ -168,7 +168,7 @@ struct tr_scrape_info
 struct tr_announcer
 {
     std::set<tr_announce_request*, StopsCompare> stops;
-    std::unordered_map<tr_quark, tr_scrape_info> scrape_info;
+    std::map<tr_interned_string, tr_scrape_info> scrape_info;
 
     tr_session* session;
     struct event* upkeepTimer;
@@ -176,9 +176,9 @@ struct tr_announcer
     time_t tauUpkeepAt;
 };
 
-static tr_scrape_info* tr_announcerGetScrapeInfo(tr_announcer* announcer, tr_quark url)
+static tr_scrape_info* tr_announcerGetScrapeInfo(tr_announcer* announcer, tr_interned_string url)
 {
-    if (url == TR_KEY_NONE)
+    if (std::empty(url))
     {
         return nullptr;
     }
@@ -227,8 +227,8 @@ void tr_announcerClose(tr_session* session)
 /* a row in tr_tier's list of trackers */
 struct tr_tracker
 {
-    tr_quark key;
-    tr_quark announce_url;
+    tr_interned_string key;
+    tr_interned_string announce_url;
     struct tr_scrape_info* scrape_info;
 
     char* tracker_id_str;
@@ -244,20 +244,19 @@ struct tr_tracker
 };
 
 // format: `${host}:${port}`
-tr_quark tr_announcerGetKey(tr_url_parsed_t const& parsed)
+tr_interned_string tr_announcerGetKey(tr_url_parsed_t const& parsed)
 {
     std::string buf;
     tr_buildBuf(buf, parsed.host, ":"sv, parsed.portstr);
-    return tr_quark_new(buf);
+    return tr_interned_string{ buf };
 }
 
 static void trackerConstruct(tr_announcer* announcer, tr_tracker* tracker, tr_announce_list::tracker_info const& info)
 {
     memset(tracker, 0, sizeof(tr_tracker));
     tracker->key = info.host;
-    tracker->announce_url = info.announce_interned;
-    tracker->scrape_info = info.scrape_interned == TR_KEY_NONE ? nullptr :
-                                                                 tr_announcerGetScrapeInfo(announcer, info.scrape_interned);
+    tracker->announce_url = info.announce_str;
+    tracker->scrape_info = std::empty(info.scrape_str) ? nullptr : tr_announcerGetScrapeInfo(announcer, info.scrape_str);
     tracker->id = info.id;
     tracker->seederCount = -1;
     tracker->leecherCount = -1;
@@ -369,9 +368,7 @@ static void tierDestruct(tr_tier* tier)
 static void tier_build_log_name(tr_tier const* tier, char* buf, size_t buflen)
 {
     auto const* const name = tier != nullptr && tier->tor != nullptr ? tr_torrentName(tier->tor) : "?";
-    auto const key_sv = tier != nullptr && tier->currentTracker != nullptr ?
-        tr_quark_get_string_view(tier->currentTracker->key) :
-        "?"sv;
+    auto const key_sv = tier != nullptr && tier->currentTracker != nullptr ? tier->currentTracker->key.sv() : "?"sv;
     tr_snprintf(buf, buflen, "[%s---%" TR_PRIsv "]", name, TR_PRIsv_ARG(key_sv));
 }
 
@@ -470,7 +467,7 @@ static tr_tier* getTier(tr_announcer* announcer, tr_sha1_digest_t const& info_ha
 ****  PUBLISH
 ***/
 
-static void publishMessage(tr_tier* tier, char const* msg, TrackerEventType type)
+static void publishMessage(tr_tier* tier, std::string_view msg, TrackerEventType type)
 {
     if (tier != nullptr && tier->tor != nullptr && tier->tor->announcer_tiers != nullptr &&
         tier->tor->announcer_tiers->callback != nullptr)
@@ -491,15 +488,15 @@ static void publishMessage(tr_tier* tier, char const* msg, TrackerEventType type
 
 static void publishErrorClear(tr_tier* tier)
 {
-    publishMessage(tier, nullptr, TR_TRACKER_ERROR_CLEAR);
+    publishMessage(tier, ""sv, TR_TRACKER_ERROR_CLEAR);
 }
 
-static void publishWarning(tr_tier* tier, char const* msg)
+static void publishWarning(tr_tier* tier, std::string_view msg)
 {
     publishMessage(tier, msg, TR_TRACKER_WARNING);
 }
 
-static void publishError(tr_tier* tier, char const* msg)
+static void publishError(tr_tier* tier, std::string_view msg)
 {
     publishMessage(tier, msg, TR_TRACKER_ERROR);
 }
@@ -652,9 +649,8 @@ static void dbgmsg_tier_announce_queue(tr_tier const* tier)
             evbuffer_add_printf(buf, "[%d:%s]", i, str);
         }
 
-        char* const message = evbuffer_free_to_str(buf, nullptr);
-        tr_logAddDeep(__FILE__, __LINE__, name, "announce queue is %s", message);
-        tr_free(message);
+        auto const message = evbuffer_free_to_str(buf);
+        tr_logAddDeep(__FILE__, __LINE__, name, "announce queue is %" TR_PRIsv, TR_PRIsv_ARG(message));
     }
 }
 
@@ -812,7 +808,7 @@ static tr_announce_request* announce_request_new(
     req->port = tr_sessionGetPublicPeerPort(announcer->session);
     req->announce_url = tier->currentTracker->announce_url;
     req->tracker_id_str = tr_strdup(tier->currentTracker->tracker_id_str);
-    req->info_hash = tr_torrentInfoHash(tor);
+    req->info_hash = tor->infoHash();
     req->peer_id = tr_torrentGetPeerId(tor);
     req->up = tier->byteCounts[TR_ANN_UP];
     req->down = tier->byteCounts[TR_ANN_DOWN];
@@ -913,7 +909,7 @@ static void on_announce_error(tr_tier* tier, char const* err, tr_announce_event 
 
     /* schedule a reannounce */
     int const interval = getRetryInterval(tier->currentTracker);
-    auto const* const key_cstr = tr_quark_get_string(tier->currentTracker->key);
+    auto const* const key_cstr = tier->currentTracker->key.c_str();
     dbgmsg(tier, "Tracker '%s' announce error: %s (Retrying in %d seconds)", key_cstr, err, interval);
     tr_logAddTorInfo(tier->tor, "Tracker '%s' announce error: %s (Retrying in %d seconds)", key_cstr, err, interval);
     tier_announce_event_push(tier, e, tr_time() + interval);
@@ -954,8 +950,8 @@ static void on_announce_done(tr_announce_response const* response, void* vdata)
             response->tracker_id_str != nullptr ? response->tracker_id_str : "none",
             response->pex_count,
             response->pex6_count,
-            response->errmsg != nullptr ? response->errmsg : "none",
-            response->warning != nullptr ? response->warning : "none");
+            (!std::empty(response->errmsg) ? response->errmsg.c_str() : "none"),
+            (!std::empty(response->warning) ? response->warning.c_str() : "none"));
 
         tier->lastAnnounceTime = now;
         tier->lastAnnounceTimedOut = response->did_timeout;
@@ -971,7 +967,7 @@ static void on_announce_done(tr_announce_response const* response, void* vdata)
         {
             on_announce_error(tier, _("Tracker did not respond"), event);
         }
-        else if (response->errmsg != nullptr)
+        else if (!std::empty(response->errmsg))
         {
             /* If the torrent's only tracker returned an error, publish it.
                Don't bother publishing if there are other trackers -- it's
@@ -982,7 +978,7 @@ static void on_announce_done(tr_announce_response const* response, void* vdata)
                 publishError(tier, response->errmsg);
             }
 
-            on_announce_error(tier, response->errmsg, event);
+            on_announce_error(tier, response->errmsg.c_str(), event);
         }
         else
         {
@@ -1023,12 +1019,11 @@ static void on_announce_done(tr_announce_response const* response, void* vdata)
                 }
             }
 
-            char const* const str = response->warning;
-            if (str != nullptr)
+            if (auto const& warning = response->warning; !std::empty(warning))
             {
-                tr_strlcpy(tier->lastAnnounceStr, str, sizeof(tier->lastAnnounceStr));
-                dbgmsg(tier, "tracker gave \"%s\"", str);
-                publishWarning(tier, str);
+                tr_strlcpy(tier->lastAnnounceStr, warning.c_str(), sizeof(tier->lastAnnounceStr));
+                dbgmsg(tier, "tracker gave \"%s\"", warning.c_str());
+                publishWarning(tier, warning);
             }
             else
             {
@@ -1127,7 +1122,7 @@ static void announce_request_delegate(
 
 #endif
 
-    if (auto const announce_sv = tr_quark_get_string_view(request->announce_url);
+    if (auto const announce_sv = request->announce_url.sv();
         tr_strvStartsWith(announce_sv, "http://"sv) || tr_strvStartsWith(announce_sv, "https://"sv))
     {
         tr_tracker_http_announce(session, request, callback, callback_data);
@@ -1211,14 +1206,14 @@ static void on_scrape_error(tr_session const* session, tr_tier* tier, char const
 
     /* schedule a rescrape */
     int const interval = getRetryInterval(tier->currentTracker);
-    auto const* const key_cstr = tr_quark_get_string(tier->currentTracker->key);
+    auto const* const key_cstr = tier->currentTracker->key.c_str();
     dbgmsg(tier, "Tracker '%s' scrape error: %s (Retrying in %zu seconds)", key_cstr, errmsg, (size_t)interval);
     tr_logAddTorInfo(tier->tor, "Tracker '%s' error: %s (Retrying in %zu seconds)", key_cstr, errmsg, (size_t)interval);
     tier->lastScrapeSucceeded = false;
     tier->scrapeAt = get_next_scrape_time(session, tier, interval);
 }
 
-static tr_tier* find_tier(tr_torrent* tor, tr_quark scrape_url)
+static tr_tier* find_tier(tr_torrent* tor, tr_interned_string scrape_url)
 {
     struct tr_announcer_tiers* tt = tor->announcer_tiers;
 
@@ -1263,7 +1258,7 @@ static void checkMultiscrapeMax(tr_announcer* announcer, tr_scrape_response cons
     {
         // don't log the full URL, since that might have a personal announce id
         // (note: we know 'parsed' will be successful since this url has a scrape_info)
-        auto const parsed = *tr_urlParse(tr_quark_get_string_view(url));
+        auto const parsed = *tr_urlParse(url.sv());
         auto clean_url = std::string{};
         tr_buildBuf(clean_url, parsed.scheme, "://"sv, parsed.host, ":"sv, parsed.portstr);
         tr_logAddNamedInfo(clean_url.c_str(), "Reducing multiscrape max to %d", n);
@@ -1288,7 +1283,7 @@ static void on_scrape_done(tr_scrape_response const* response, void* vsession)
 
             if (tier != nullptr)
             {
-                auto const scrape_url_sv = tr_quark_get_string_view(response->scrape_url);
+                auto const scrape_url_sv = response->scrape_url.sv();
 
                 dbgmsg(
                     tier,
@@ -1378,7 +1373,7 @@ static void scrape_request_delegate(
 {
     tr_session* session = announcer->session;
 
-    auto const scrape_sv = tr_quark_get_string_view(request->scrape_url);
+    auto const scrape_sv = request->scrape_url.sv();
 
     if (tr_strvStartsWith(scrape_sv, "http://"sv) || tr_strvStartsWith(scrape_sv, "https://"sv))
     {
@@ -1423,7 +1418,7 @@ static void multiscrape(tr_announcer* announcer, std::vector<tr_tier*> const& ti
                 continue;
             }
 
-            req->info_hash[req->info_hash_count] = tr_torrentInfoHash(tier->tor);
+            req->info_hash[req->info_hash_count] = tier->tor->infoHash();
             ++req->info_hash_count;
             tier->isScraping = true;
             tier->lastScrapeStartTime = now;
@@ -1437,7 +1432,7 @@ static void multiscrape(tr_announcer* announcer, std::vector<tr_tier*> const& ti
             req->scrape_url = scrape_info->scrape_url;
             tier_build_log_name(tier, req->log_name, sizeof(req->log_name));
 
-            req->info_hash[req->info_hash_count] = tr_torrentInfoHash(tier->tor);
+            req->info_hash[req->info_hash_count] = tier->tor->infoHash();
             ++req->info_hash_count;
             tier->isScraping = true;
             tier->lastScrapeStartTime = now;
@@ -1609,9 +1604,9 @@ static tr_tracker_view trackerView(tr_torrent const& tor, int tier_index, tr_tie
     auto const now = tr_time();
     auto view = tr_tracker_view{};
 
-    view.host = tr_quark_get_string(tracker.key);
-    view.announce = tr_quark_get_string(tracker.announce_url);
-    view.scrape = tracker.scrape_info == nullptr ? "" : tr_quark_get_string(tracker.scrape_info->scrape_url);
+    view.host = tracker.key.c_str();
+    view.announce = tracker.announce_url.c_str();
+    view.scrape = tracker.scrape_info == nullptr ? "" : tracker.scrape_info->scrape_url.c_str();
 
     view.id = tracker.id;
     view.tier = tier_index;

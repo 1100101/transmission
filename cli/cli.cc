@@ -39,31 +39,30 @@
 ****
 ***/
 
-#define MEM_K 1024
-#define MEM_K_STR "KiB"
-#define MEM_M_STR "MiB"
-#define MEM_G_STR "GiB"
-#define MEM_T_STR "TiB"
+static auto constexpr MemK = size_t{ 1024 };
+static char constexpr MemKStr[] = "KiB";
+static char constexpr MemMStr[] = "MiB";
+static char constexpr MemGStr[] = "GiB";
+static char constexpr MemTStr[] = "TiB";
 
-#define DISK_K 1000
-#define DISK_B_STR "B"
-#define DISK_K_STR "kB"
-#define DISK_M_STR "MB"
-#define DISK_G_STR "GB"
-#define DISK_T_STR "TB"
+static auto constexpr DiskK = size_t{ 1000 };
+static char constexpr DiskKStr[] = "kB";
+static char constexpr DiskMStr[] = "MB";
+static char constexpr DiskGStr[] = "GB";
+static char constexpr DiskTStr[] = "TB";
 
-#define SPEED_K 1000
-#define SPEED_B_STR "B/s"
+static auto constexpr SpeedK = size_t{ 1000 };
 #define SPEED_K_STR "kB/s"
-#define SPEED_M_STR "MB/s"
-#define SPEED_G_STR "GB/s"
-#define SPEED_T_STR "TB/s"
+static char constexpr SpeedKStr[] = SPEED_K_STR;
+static char constexpr SpeedMStr[] = "MB/s";
+static char constexpr SpeedGStr[] = "GB/s";
+static char constexpr SpeedTStr[] = "TB/s";
 
 /***
 ****
 ***/
 
-#define LINEWIDTH 80
+static auto constexpr LineWidth = int{ 80 };
 
 static char constexpr MyConfigName[] = "transmission";
 static char constexpr MyReadableName[] = "transmission-cli";
@@ -142,7 +141,7 @@ static void onTorrentFileDownloaded(
     void* vctor)
 {
     auto* ctor = static_cast<tr_ctor*>(vctor);
-    tr_ctorSetMetainfo(ctor, std::data(response), std::size(response));
+    tr_ctorSetMetainfo(ctor, std::data(response), std::size(response), nullptr);
     waitingOnWeb = false;
 }
 
@@ -163,12 +162,7 @@ static void getStatusStr(tr_stat const* st, char* buf, size_t buflen)
     }
     else if (st->activity == TR_STATUS_DOWNLOAD)
     {
-        char upStr[80];
-        char dnStr[80];
         char ratioStr[80];
-
-        tr_formatter_speed_KBps(upStr, st->pieceUploadSpeed_KBps, sizeof(upStr));
-        tr_formatter_speed_KBps(dnStr, st->pieceDownloadSpeed_KBps, sizeof(dnStr));
         tr_strlratio(ratioStr, st->ratio, sizeof(ratioStr));
 
         tr_snprintf(
@@ -178,17 +172,14 @@ static void getStatusStr(tr_stat const* st, char* buf, size_t buflen)
             tr_truncd(100 * st->percentDone, 1),
             st->peersSendingToUs,
             st->peersConnected,
-            dnStr,
+            tr_formatter_speed_KBps(st->pieceDownloadSpeed_KBps).c_str(),
             st->peersGettingFromUs,
-            upStr,
+            tr_formatter_speed_KBps(st->pieceUploadSpeed_KBps).c_str(),
             ratioStr);
     }
     else if (st->activity == TR_STATUS_SEED)
     {
-        char upStr[80];
         char ratioStr[80];
-
-        tr_formatter_speed_KBps(upStr, st->pieceUploadSpeed_KBps, sizeof(upStr));
         tr_strlratio(ratioStr, st->ratio, sizeof(ratioStr));
 
         tr_snprintf(
@@ -197,7 +188,7 @@ static void getStatusStr(tr_stat const* st, char* buf, size_t buflen)
             "Seeding, uploading to %d of %d peer(s), %s [%s]",
             st->peersGettingFromUs,
             st->peersConnected,
-            upStr,
+            tr_formatter_speed_KBps(st->pieceUploadSpeed_KBps).c_str(),
             ratioStr);
     }
     else
@@ -236,13 +227,12 @@ int tr_main(int argc, char* argv[])
 {
     tr_session* h;
     tr_ctor* ctor;
-    tr_torrent* tor = nullptr;
     tr_variant settings;
     char const* configDir;
 
-    tr_formatter_mem_init(MEM_K, MEM_K_STR, MEM_M_STR, MEM_G_STR, MEM_T_STR);
-    tr_formatter_size_init(DISK_K, DISK_K_STR, DISK_M_STR, DISK_G_STR, DISK_T_STR);
-    tr_formatter_speed_init(SPEED_K, SPEED_K_STR, SPEED_M_STR, SPEED_G_STR, SPEED_T_STR);
+    tr_formatter_mem_init(MemK, MemKStr, MemMStr, MemGStr, MemTStr);
+    tr_formatter_size_init(DiskK, DiskKStr, DiskMStr, DiskGStr, DiskTStr);
+    tr_formatter_speed_init(SpeedK, SpeedKStr, SpeedMStr, SpeedGStr, SpeedTStr);
 
     printf("%s %s\n", MyReadableName, LONG_VERSION_STRING);
 
@@ -302,11 +292,11 @@ int tr_main(int argc, char* argv[])
 
     if (tr_sys_path_exists(torrentPath, nullptr))
     {
-        tr_ctorSetMetainfoFromFile(ctor, torrentPath);
+        tr_ctorSetMetainfoFromFile(ctor, torrentPath, nullptr);
     }
     else if (memcmp(torrentPath, "magnet:?", 8) == 0)
     {
-        tr_ctorSetMetainfoFromMagnetLink(ctor, torrentPath);
+        tr_ctorSetMetainfoFromMagnetLink(ctor, torrentPath, nullptr);
     }
     else if (memcmp(torrentPath, "http", 4) == 0)
     {
@@ -327,9 +317,8 @@ int tr_main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    tor = tr_torrentNew(ctor, nullptr, nullptr);
+    tr_torrent* tor = tr_torrentNew(ctor, nullptr);
     tr_ctorFree(ctor);
-
     if (tor == nullptr)
     {
         fprintf(stderr, "Failed opening torrent file `%s'\n", torrentPath);
@@ -351,7 +340,7 @@ int tr_main(int argc, char* argv[])
 
     for (;;)
     {
-        char line[LINEWIDTH];
+        char line[LineWidth];
         tr_stat const* st;
         char const* messageName[] = {
             nullptr,
@@ -392,7 +381,7 @@ int tr_main(int argc, char* argv[])
         }
 
         getStatusStr(st, line, sizeof(line));
-        printf("\r%-*s", TR_ARG_TUPLE(LINEWIDTH, line));
+        printf("\r%-*s", TR_ARG_TUPLE(LineWidth, line));
 
         if (messageName[st->error])
         {

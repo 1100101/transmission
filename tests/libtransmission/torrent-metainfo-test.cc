@@ -6,36 +6,89 @@
  *
  */
 
+#include <array>
+#include <cerrno>
+#include <cstring>
+#include <string_view>
+
 #include "transmission.h"
 
 #include "error.h"
 #include "metainfo.h"
+#include "torrent-metainfo.h"
 #include "torrent.h"
 #include "utils.h"
 
 #include "test-fixtures.h"
 
-#include <array>
-#include <cerrno>
-#include <cstring>
-#include <string_view>
+using namespace std::literals;
+
+namespace libtransmission
+{
+namespace test
+{
+
+using TorrentMetainfoTest = SessionTest;
+
+TEST_F(TorrentMetainfoTest, magnetLink)
+{
+    // background info @ http://wiki.theory.org/BitTorrent_Magnet-URI_Webseeding
+    char const constexpr* const MagnetLink =
+        "magnet:?"
+        "xt=urn:btih:14ffe5dd23188fd5cb53a1d47f1289db70abf31e"
+        "&dn=ubuntu_12_04_1_desktop_32_bit"
+        "&tr=http%3A%2F%2Ftracker.publicbt.com%2Fannounce"
+        "&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80"
+        "&ws=http%3A%2F%2Ftransmissionbt.com";
+
+    auto metainfo = tr_torrent_metainfo{};
+    EXPECT_TRUE(metainfo.parseMagnet(MagnetLink));
+    EXPECT_EQ(0, std::size(metainfo.files())); // because it's a magnet link
+    EXPECT_EQ(2, std::size(metainfo.announceList()));
+    EXPECT_EQ(MagnetLink, metainfo.magnet());
+}
 
 #define BEFORE_PATH \
     "d10:created by25:Transmission/2.82 (14160)13:creation datei1402280218e8:encoding5:UTF-84:infod5:filesld6:lengthi2e4:pathl"
 #define AFTER_PATH \
     "eed6:lengthi2e4:pathl5:b.txteee4:name3:foo12:piece lengthi32768e6:pieces20:ÞÉ`âMs¡Å;Ëº¬.åÂà7:privatei0eee"
 
-using namespace std::literals;
-
-namespace libtransmission
+// FIXME: split these into parameterized tests?
+TEST_F(TorrentMetainfoTest, bucket)
 {
+    struct LocalTest
+    {
+        std::string_view benc;
+        bool expected_parse_result;
+    };
 
-namespace test
-{
+    auto const tests = std::array<LocalTest, 9>{ {
+        { BEFORE_PATH "5:a.txt" AFTER_PATH, true },
+        // allow empty components, but not =all= empty components, see bug #5517
+        { BEFORE_PATH "0:5:a.txt" AFTER_PATH, true },
+        { BEFORE_PATH "0:0:" AFTER_PATH, false },
+        // allow path separators in a filename (replaced with '_')
+        { BEFORE_PATH "7:a/a.txt" AFTER_PATH, true },
+        // allow "." components (skipped)
+        { BEFORE_PATH "1:.5:a.txt" AFTER_PATH, true },
+        { BEFORE_PATH "5:a.txt1:." AFTER_PATH, true },
+        // allow ".." components (replaced with "__")
+        { BEFORE_PATH "2:..5:a.txt" AFTER_PATH, true },
+        { BEFORE_PATH "5:a.txt2:.." AFTER_PATH, true },
+        // fail on empty string
+        { "", false },
+    } };
 
-using MetainfoTest = SessionTest;
+    tr_logSetLevel(TR_LOG_SILENT);
 
-TEST_F(MetainfoTest, sanitize)
+    for (auto const& test : tests)
+    {
+        auto metainfo = tr_torrent_metainfo{};
+        EXPECT_EQ(test.expected_parse_result, metainfo.parseBenc(test.benc));
+    }
+}
+
+TEST_F(TorrentMetainfoTest, sanitize)
 {
     struct LocalTest
     {
@@ -90,16 +143,18 @@ TEST_F(MetainfoTest, sanitize)
     }
 }
 
-TEST_F(MetainfoTest, AndroidTorrent)
+TEST_F(TorrentMetainfoTest, AndroidTorrent)
 {
     auto const filename = tr_strvJoin(LIBTRANSMISSION_TEST_ASSETS_DIR, "/Android-x86 8.1 r6 iso.torrent"sv);
 
     auto* ctor = tr_ctorNew(session_);
-    EXPECT_TRUE(tr_ctorSetMetainfoFromFile(ctor, filename.c_str(), nullptr));
+    tr_error* error = nullptr;
+    EXPECT_TRUE(tr_ctorSetMetainfoFromFile(ctor, filename.c_str(), &error));
+    EXPECT_EQ(nullptr, error);
     tr_ctorFree(ctor);
 }
 
-TEST_F(MetainfoTest, ctorSaveContents)
+TEST_F(TorrentMetainfoTest, ctorSaveContents)
 {
     auto const src_filename = tr_strvJoin(LIBTRANSMISSION_TEST_ASSETS_DIR, "/Android-x86 8.1 r6 iso.torrent"sv);
     auto const tgt_filename = tr_strvJoin(::testing::TempDir(), "save-contents-test.torrent");
@@ -136,5 +191,4 @@ TEST_F(MetainfoTest, ctorSaveContents)
 }
 
 } // namespace test
-
 } // namespace libtransmission

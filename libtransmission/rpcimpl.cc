@@ -41,11 +41,11 @@
 #include "web.h"
 #include "web-utils.h"
 
-#define RPC_VERSION 17
-#define RPC_VERSION_MIN 14
-#define RPC_VERSION_SEMVER "5.3.0"
+static auto constexpr RpcVersion = int64_t{ 17 };
+static auto constexpr RpcVersionMin = int64_t{ 14 };
+static char constexpr RpcVersionSemver[] = "5.3.0";
 
-#define RECENTLY_ACTIVE_SECONDS 60
+static auto constexpr RecentlyActiveSeconds = time_t{ 60 };
 
 using namespace std::literals;
 
@@ -156,7 +156,7 @@ static auto getTorrents(tr_session* session, tr_variant* args)
     {
         if (sv == "recently-active"sv)
         {
-            time_t const cutoff = tr_time() - RECENTLY_ACTIVE_SECONDS;
+            time_t const cutoff = tr_time() - RecentlyActiveSeconds;
 
             torrents.reserve(std::size(session->torrents));
             std::copy_if(
@@ -414,9 +414,9 @@ static void addTrackers(tr_torrent const* tor, tr_variant* trackers)
     for (auto const& tracker : tor->announceList())
     {
         tr_variant* d = tr_variantListAddDict(trackers, 4);
-        tr_variantDictAddQuark(d, TR_KEY_announce, tracker.announce_interned);
+        tr_variantDictAddQuark(d, TR_KEY_announce, tracker.announce_str.quark());
         tr_variantDictAddInt(d, TR_KEY_id, tracker.id);
-        tr_variantDictAddQuark(d, TR_KEY_scrape, tracker.scrape_interned);
+        tr_variantDictAddQuark(d, TR_KEY_scrape, tracker.scrape_str.quark());
         tr_variantDictAddInt(d, TR_KEY_tier, tracker.tier);
     }
 }
@@ -574,7 +574,7 @@ static void initField(
         break;
 
     case TR_KEY_hashString:
-        tr_variantInitStrView(initme, tor->hashString());
+        tr_variantInitStrView(initme, tor->infoHashString());
         break;
 
     case TR_KEY_haveUnchecked:
@@ -878,7 +878,7 @@ static char const* torrentGet(tr_session* session, tr_variant* args_in, tr_varia
     if (tr_variantDictFindStrView(args_in, TR_KEY_ids, &sv) && sv == "recently-active"sv)
     {
         time_t const now = tr_time();
-        int const interval = RECENTLY_ACTIVE_SECONDS;
+        auto const interval = RecentlyActiveSeconds;
 
         auto const& removed = session->removed_torrents;
         tr_variant* removed_out = tr_variantDictAddList(args_out, TR_KEY_removed, std::size(removed));
@@ -902,7 +902,7 @@ static char const* torrentGet(tr_session* session, tr_variant* args_in, tr_varia
         /* make an array of property name quarks */
         size_t keyCount = 0;
         size_t const n = tr_variantListSize(fields);
-        tr_quark* keys = tr_new(tr_quark, n);
+        auto* const keys = tr_new(tr_quark, n);
         for (size_t i = 0; i < n; ++i)
         {
             if (!tr_variantGetStrView(tr_variantListChild(fields, i), &sv))
@@ -1506,21 +1506,20 @@ static char const* blocklistUpdate(
 
 static void addTorrentImpl(struct tr_rpc_idle_data* data, tr_ctor* ctor)
 {
-    auto err = int{};
-    auto duplicate_id = int{};
-    tr_torrent* tor = tr_torrentNew(ctor, &err, &duplicate_id);
+    tr_torrent* duplicate_of = nullptr;
+    tr_torrent* tor = tr_torrentNew(ctor, &duplicate_of);
     tr_ctorFree(ctor);
 
     auto key = tr_quark{};
     char const* result = "invalid or corrupt torrent file";
-    if (err == 0)
+    if (tor != nullptr)
     {
         key = TR_KEY_torrent_added;
         result = nullptr;
     }
-    else if (err == TR_PARSE_DUPLICATE)
+    else if (duplicate_of != nullptr)
     {
-        tor = tr_torrentFindFromId(data->session, duplicate_id);
+        tor = duplicate_of;
         key = TR_KEY_torrent_duplicate;
         result = "duplicate torrent";
     }
@@ -1570,7 +1569,7 @@ static void gotMetadataFromURL(
 
     if (response_code == 200 || response_code == 221) /* http or ftp success.. */
     {
-        tr_ctorSetMetainfo(data->ctor, std::data(response), std::size(response));
+        tr_ctorSetMetainfo(data->ctor, std::data(response), std::size(response), nullptr);
         addTorrentImpl(data->data, data->ctor);
     }
     else
@@ -1710,20 +1709,20 @@ static char const* torrentAdd(tr_session* session, tr_variant* args_in, tr_varia
         if (std::empty(filename))
         {
             std::string const metainfo = tr_base64_decode_str(metainfo_base64);
-            tr_ctorSetMetainfo(ctor, std::data(metainfo), std::size(metainfo));
+            tr_ctorSetMetainfo(ctor, std::data(metainfo), std::size(metainfo), nullptr);
         }
         else
         {
             // these two tr_ctorSet*() functions require zero-terminated strings
-            auto const filename_str = std::string{ filename };
+            auto const filename_sz = std::string{ filename };
 
             if (tr_strvStartsWith(filename, "magnet:?"sv))
             {
-                tr_ctorSetMetainfoFromMagnetLink(ctor, filename_str.c_str());
+                tr_ctorSetMetainfoFromMagnetLink(ctor, filename_sz.c_str(), nullptr);
             }
             else
             {
-                tr_ctorSetMetainfoFromFile(ctor, filename_str.c_str());
+                tr_ctorSetMetainfoFromFile(ctor, filename_sz.c_str(), nullptr);
             }
         }
 
@@ -2180,15 +2179,15 @@ static void addSessionField(tr_session* s, tr_variant* d, tr_quark key)
         break;
 
     case TR_KEY_rpc_version:
-        tr_variantDictAddInt(d, key, RPC_VERSION);
+        tr_variantDictAddInt(d, key, RpcVersion);
         break;
 
     case TR_KEY_rpc_version_semver:
-        tr_variantDictAddStrView(d, key, RPC_VERSION_SEMVER);
+        tr_variantDictAddStrView(d, key, RpcVersionSemver);
         break;
 
     case TR_KEY_rpc_version_minimum:
-        tr_variantDictAddInt(d, key, RPC_VERSION_MIN);
+        tr_variantDictAddInt(d, key, RpcVersionMin);
         break;
 
     case TR_KEY_seedRatioLimit:

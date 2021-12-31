@@ -78,25 +78,17 @@ Glib::ustring gtr_get_unicode_string(int i)
 
 Glib::ustring tr_strlratio(double ratio)
 {
-    std::array<char, 64> buf = {};
-    return tr_strratio(buf.data(), buf.size(), ratio, gtr_get_unicode_string(GTR_UNICODE_INF).c_str());
+    return tr_strratio(ratio, gtr_get_unicode_string(GTR_UNICODE_INF).c_str());
 }
 
 Glib::ustring tr_strlpercent(double x)
 {
-    std::array<char, 64> buf = {};
-    return tr_strpercent(buf.data(), x, buf.size());
+    return tr_strpercent(x);
 }
 
 Glib::ustring tr_strlsize(guint64 bytes)
 {
-    if (bytes == 0)
-    {
-        return Q_("None");
-    }
-
-    std::array<char, 64> buf = {};
-    return tr_formatter_size_B(buf.data(), bytes, buf.size());
+    return bytes == 0 ? Q_("None") : tr_formatter_size_B(bytes);
 }
 
 Glib::ustring tr_strltime(time_t seconds)
@@ -219,16 +211,12 @@ Gtk::Window* getWindow(Gtk::Widget* w)
 
 } // namespace
 
-void gtr_add_torrent_error_dialog(Gtk::Widget& child, int err, tr_torrent* duplicate_torrent, std::string const& filename)
+void gtr_add_torrent_error_dialog(Gtk::Widget& child, tr_torrent* duplicate_torrent, std::string const& filename)
 {
     Glib::ustring secondary;
     auto* win = getWindow(&child);
 
-    if (err == TR_PARSE_ERR)
-    {
-        secondary = gtr_sprintf(_("The torrent file \"%s\" contains invalid data."), filename);
-    }
-    else if (err == TR_PARSE_DUPLICATE)
+    if (duplicate_torrent != nullptr)
     {
         secondary = gtr_sprintf(
             _("The torrent file \"%s\" is already in use by \"%s.\""),
@@ -237,7 +225,7 @@ void gtr_add_torrent_error_dialog(Gtk::Widget& child, int err, tr_torrent* dupli
     }
     else
     {
-        secondary = gtr_sprintf(_("The torrent file \"%s\" encountered an unknown error."), filename);
+        secondary = gtr_sprintf(_("Unable to add torrent file \"%s\"."), filename);
     }
 
     auto w = std::make_shared<Gtk::MessageDialog>(
@@ -315,7 +303,7 @@ bool gtr_file_trash_or_remove(std::string const& filename, tr_error** error)
         catch (Glib::Error const& e)
         {
             g_message("Unable to trash file \"%s\": %s", filename.c_str(), e.what().c_str());
-            tr_error_set_literal(error, e.code(), e.what().c_str());
+            tr_error_set(error, e.code(), e.what().raw());
         }
     }
 
@@ -329,7 +317,7 @@ bool gtr_file_trash_or_remove(std::string const& filename, tr_error** error)
         {
             g_message("Unable to delete file \"%s\": %s", filename.c_str(), e.what().c_str());
             tr_error_clear(error);
-            tr_error_set_literal(error, e.code(), e.what().c_str());
+            tr_error_set(error, e.code(), e.what().raw());
             result = false;
         }
     }

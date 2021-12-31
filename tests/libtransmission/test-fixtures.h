@@ -379,14 +379,15 @@ protected:
         EXPECT_NE(nullptr, metainfo);
         EXPECT_LT(size_t{ 0 }, metainfo_len);
         auto* ctor = tr_ctorNew(session_);
-        tr_ctorSetMetainfo(ctor, static_cast<char const*>(metainfo), metainfo_len);
+        tr_error* error = nullptr;
+        EXPECT_TRUE(tr_ctorSetMetainfo(ctor, static_cast<char const*>(metainfo), metainfo_len, &error));
+        EXPECT_EQ(nullptr, error);
         tr_ctorSetPaused(ctor, TR_FORCE, true);
         tr_free(metainfo);
 
         // create the torrent
-        auto err = int{};
-        auto* tor = tr_torrentNew(ctor, &err, nullptr);
-        EXPECT_EQ(0, err);
+        auto* const tor = tr_torrentNew(ctor, nullptr);
+        EXPECT_NE(nullptr, tor);
 
         // cleanup
         tr_ctorFree(ctor);
@@ -399,8 +400,8 @@ protected:
         {
             auto const file = tr_torrentFile(tor, i);
 
-            auto path = (!complete && i == 0) ? tr_strvJoin(tor->currentDir, TR_PATH_DELIMITER_STR, file.name, ".part") :
-                                                tr_strvJoin(tor->currentDir, TR_PATH_DELIMITER_STR, file.name);
+            auto path = (!complete && i == 0) ? tr_strvJoin(tor->currentDir().sv(), TR_PATH_DELIMITER_STR, file.name, ".part") :
+                                                tr_strvJoin(tor->currentDir().sv(), TR_PATH_DELIMITER_STR, file.name);
 
             auto const dirname = makeString(tr_sys_path_dirname(path.c_str(), nullptr));
             tr_sys_dir_create(dirname.data(), TR_SYS_DIR_CREATE_PARENTS, 0700, nullptr);

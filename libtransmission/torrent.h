@@ -29,6 +29,7 @@
 #include "completion.h"
 #include "file.h"
 #include "file-piece-map.h"
+#include "interned-string.h"
 #include "quark.h"
 #include "session.h"
 #include "tr-assert.h"
@@ -56,9 +57,9 @@ void tr_ctorInitTorrentPriorities(tr_ctor const* ctor, tr_torrent* tor);
 
 void tr_ctorInitTorrentWanted(tr_ctor const* ctor, tr_torrent* tor);
 
-bool tr_ctorSaveContents(tr_ctor const* ctor, char const* filename, tr_error** error);
+bool tr_ctorSaveContents(tr_ctor const* ctor, std::string_view filename, tr_error** error);
 
-bool tr_ctorGetMetainfo(tr_ctor const* ctor, tr_variant const** setme);
+std::string_view tr_ctorGetContents(tr_ctor const* ctor);
 
 tr_session* tr_ctorGetSession(tr_ctor const* ctor);
 
@@ -74,13 +75,9 @@ void tr_torrentSetLabels(tr_torrent* tor, tr_labels_t&& labels);
 
 void tr_torrentChangeMyPort(tr_torrent* session);
 
-tr_sha1_digest_t tr_torrentInfoHash(tr_torrent const* torrent);
-
-tr_torrent* tr_torrentFindFromObfuscatedHash(tr_session* session, uint8_t const* hash);
+tr_torrent* tr_torrentFindFromObfuscatedHash(tr_session* session, tr_sha1_digest_t const& hash);
 
 bool tr_torrentReqIsValid(tr_torrent const* tor, tr_piece_index_t index, uint32_t offset, uint32_t length);
-
-uint64_t tr_pieceOffset(tr_torrent const* tor, tr_piece_index_t index, uint32_t offset, uint32_t length);
 
 void tr_torrentGetBlockLocation(
     tr_torrent const* tor,
@@ -95,8 +92,6 @@ void tr_torrentCheckSeedLimit(tr_torrent* tor);
 
 /** save a torrent's .resume file if it's changed since the last time it was saved */
 void tr_torrentSave(tr_torrent* tor);
-
-void tr_torrentSetLocalError(tr_torrent* tor, char const* fmt, ...) TR_GNUC_PRINTF(2, 3);
 
 enum tr_verify_state
 {
@@ -245,6 +240,16 @@ public:
         return fpm_.pieceSpan(file);
     }
 
+    [[nodiscard]] auto fileOffset(uint64_t offset) const
+    {
+        return fpm_.fileOffset(offset);
+    }
+
+    [[nodiscard]] auto fileOffset(tr_piece_index_t piece, uint32_t piece_offset) const
+    {
+        return fpm_.fileOffset(this->offset(piece, piece_offset));
+    }
+
     /// WANTED
 
     [[nodiscard]] bool pieceIsWanted(tr_piece_index_t piece) const final
@@ -286,6 +291,23 @@ public:
     {
         file_priorities_.set(file, priority);
         setDirty();
+    }
+
+    /// LOCATION
+
+    [[nodiscard]] tr_interned_string currentDir() const
+    {
+        return this->current_dir;
+    }
+
+    [[nodiscard]] tr_interned_string downloadDir() const
+    {
+        return this->download_dir;
+    }
+
+    [[nodiscard]] tr_interned_string incompleteDir() const
+    {
+        return this->incomplete_dir;
     }
 
     /// METAINFO - FILES
@@ -366,6 +388,13 @@ public:
 
     /// METAINFO - OTHER
 
+    void setName(std::string_view name);
+
+    [[nodiscard]] auto const& infoHash() const
+    {
+        return this->info.hash;
+    }
+
     [[nodiscard]] auto isPrivate() const
     {
         return this->info.isPrivate;
@@ -396,7 +425,7 @@ public:
         return this->info.totalSize;
     }
 
-    [[nodiscard]] auto hashString() const
+    [[nodiscard]] auto infoHashString() const
     {
         return this->info.hashString;
     }
@@ -419,6 +448,11 @@ public:
     [[nodiscard]] auto hasMetadata() const
     {
         return fileCount() > 0;
+    }
+
+    [[nodiscard]] auto infoDictLength() const
+    {
+        return this->info_dict_length;
     }
 
     /// METAINFO - CHECKSUMS
@@ -445,13 +479,16 @@ public:
         TR_ASSERT(std::size(checked) == this->pieceCount());
         checked_pieces_ = checked;
 
+        auto const n = this->fileCount();
+        this->file_mtimes_.resize(n);
+
         auto filename = std::string{};
-        for (size_t i = 0, n = this->fileCount(); i < n; ++i)
+        for (size_t i = 0; i < n; ++i)
         {
             auto const found = this->findFile(filename, i);
             auto const mtime = found ? found->last_modified_at : 0;
 
-            this->file(i).priv.mtime = mtime;
+            this->file_mtimes_[i] = mtime;
 
             // if a file has changed, mark its pieces as unchecked
             if (mtime == 0 || mtime != mtimes[i])
@@ -501,6 +538,13 @@ public:
         return this->isPieceTransferAllowed(TR_CLIENT_TO_PEER);
     }
 
+    void setLocalError(std::string_view errmsg)
+    {
+        this->error = TR_STAT_LOCAL_ERROR;
+        this->error_announce_url = TR_KEY_NONE;
+        this->error_string = errmsg;
+    }
+
     void setVerifyState(tr_verify_state state);
 
     void setDateActive(time_t t);
@@ -532,12 +576,12 @@ public:
     std::optional<double> verify_progress;
 
     tr_stat_errtype error = TR_STAT_OK;
-    char errorString[128] = {};
-    tr_quark error_announce_url = TR_KEY_NONE;
+    tr_interned_string error_announce_url;
+    std::string error_string;
 
     bool checkPiece(tr_piece_index_t piece);
 
-    uint8_t obfuscatedHash[SHA_DIGEST_LENGTH] = {};
+    tr_sha1_digest_t obfuscated_hash = {};
 
     /* Used when the torrent has been created with a magnet link
      * and we're in the process of downloading the metainfo from
@@ -555,18 +599,19 @@ public:
 
     time_t peer_id_creation_time = 0;
 
-    /* Where the files will be when it's complete */
-    char* downloadDir = nullptr;
+    // Where the files are when the torrent is complete.
+    tr_interned_string download_dir;
 
-    /* Where the files are when the torrent is incomplete */
-    char* incompleteDir = nullptr;
+    // Where the files are when the torrent is incomplete.
+    // a value of TR_KEY_NONE indicates the 'incomplete_dir' feature is unused
+    tr_interned_string incomplete_dir;
 
-    /* Where the files are now.
-     * This pointer will be equal to downloadDir or incompleteDir */
-    char const* currentDir = nullptr;
+    // Where the files are now.
+    // Will equal either download_dir or incomplete_dir
+    tr_interned_string current_dir;
 
     /* Length, in bytes, of the "info" dict in the .torrent file. */
-    uint64_t infoDictLength = 0;
+    uint64_t info_dict_length = 0;
 
     /* Offset, in bytes, of the beginning of the "info" dict in the .torrent file.
      *
@@ -667,6 +712,8 @@ public:
     tr_file_priorities file_priorities_{ &fpm_ };
     tr_files_wanted files_wanted_{ &fpm_ };
 
+    std::vector<time_t> file_mtimes_;
+
 private:
     void setFilesWanted(tr_file_index_t const* files, size_t n_files, bool wanted, bool is_bootstrapping)
     {
@@ -725,3 +772,6 @@ char* tr_torrentBuildPartial(tr_torrent const*, tr_file_index_t fileNo);
 void tr_torrentGotNewInfoDict(tr_torrent* tor);
 
 tr_peer_id_t const& tr_torrentGetPeerId(tr_torrent* tor);
+
+/** @brief free a metainfo */
+void tr_metainfoFree(tr_info* inf);

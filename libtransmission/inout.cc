@@ -26,6 +26,8 @@
 #include "tr-assert.h"
 #include "utils.h"
 
+using namespace std::literals;
+
 /****
 *****  Low-level IO functions
 ****/
@@ -148,52 +150,6 @@ static int readOrWriteBytes(
     return err;
 }
 
-static int compareOffsetToFile(void const* a, void const* b)
-{
-    auto const offset = *static_cast<uint64_t const*>(a);
-    auto const* file = static_cast<tr_file const*>(b);
-
-    if (offset < file->priv.offset)
-    {
-        return -1;
-    }
-
-    if (offset >= file->priv.offset + file->length)
-    {
-        return 1;
-    }
-
-    return 0;
-}
-
-// TODO(ckerr) migrate to fpm
-void tr_ioFindFileLocation(
-    tr_torrent const* tor,
-    tr_piece_index_t pieceIndex,
-    uint32_t pieceOffset,
-    tr_file_index_t* fileIndex,
-    uint64_t* fileOffset)
-{
-    TR_ASSERT(tr_isTorrent(tor));
-
-    uint64_t const offset = tr_pieceOffset(tor, pieceIndex, pieceOffset, 0);
-    TR_ASSERT(offset < tor->totalSize());
-
-    auto const n_files = tor->fileCount();
-    auto const* file = static_cast<tr_file const*>(
-        bsearch(&offset, tor->info.files, n_files, sizeof(tr_file), compareOffsetToFile));
-    TR_ASSERT(file != nullptr);
-
-    if (file != nullptr)
-    {
-        *fileIndex = file - tor->info.files;
-        *fileOffset = offset - file->priv.offset;
-        TR_ASSERT(*fileIndex < n_files);
-        TR_ASSERT(*fileOffset < file->length);
-        TR_ASSERT(tor->file(*fileIndex).priv.offset + *fileOffset == offset);
-    }
-}
-
 /* returns 0 on success, or an errno on failure */
 static int readOrWritePiece(
     tr_torrent* tor,
@@ -210,9 +166,7 @@ static int readOrWritePiece(
         return EINVAL;
     }
 
-    auto fileIndex = tr_file_index_t{};
-    auto fileOffset = uint64_t{};
-    tr_ioFindFileLocation(tor, pieceIndex, pieceOffset, &fileIndex, &fileOffset);
+    auto [fileIndex, fileOffset] = tor->fileOffset(pieceIndex, pieceOffset);
 
     while (buflen != 0 && err == 0)
     {
@@ -227,8 +181,8 @@ static int readOrWritePiece(
 
         if (err != 0 && ioMode == TR_IO_WRITE && tor->error != TR_STAT_LOCAL_ERROR)
         {
-            auto const path = tr_strvPath(tor->downloadDir, file.name);
-            tr_torrentSetLocalError(tor, "%s (%s)", tr_strerror(err), path.c_str());
+            auto const path = tr_strvPath(tor->downloadDir().sv(), file.name);
+            tor->setLocalError(tr_strvJoin(tr_strerror(err), " ("sv, path, ")"sv));
         }
     }
 
@@ -271,7 +225,7 @@ static std::optional<tr_sha1_digest_t> recalculateHash(tr_torrent* tor, tr_piece
         if (auto const success = tr_cacheReadBlock(tor->session->cache, tor, piece, offset, len, std::data(buffer)) == 0;
             !success)
         {
-            tr_sha1_final(sha, nullptr);
+            tr_sha1_final(sha);
             return {};
         }
 

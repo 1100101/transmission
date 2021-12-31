@@ -23,7 +23,7 @@
 
 #include "transmission.h"
 
-#include "quark.h"
+#include "interned-string.h"
 #include "web-utils.h"
 
 struct tr_error;
@@ -33,11 +33,11 @@ class tr_announce_list
 public:
     struct tracker_info
     {
-        tr_quark host;
         tr_url_parsed_t announce;
         tr_url_parsed_t scrape;
-        tr_quark announce_interned = TR_KEY_NONE;
-        tr_quark scrape_interned = TR_KEY_NONE;
+        tr_interned_string announce_str;
+        tr_interned_string scrape_str;
+        tr_interned_string host;
         tr_tracker_tier_t tier = 0;
         tr_tracker_id_t id = 0;
 
@@ -105,7 +105,7 @@ public:
         return trackers_.clear();
     }
 
-    bool save(char const* torrent_file, tr_error** error = nullptr) const;
+    bool save(std::string_view torrent_file, tr_error** error = nullptr) const;
 
     static std::optional<std::string> announceToScrape(std::string_view announce);
     static tr_quark announceToScrape(tr_quark announce);
