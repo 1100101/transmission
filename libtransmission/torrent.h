@@ -317,19 +317,21 @@ public:
         return info.fileCount;
     }
 
-    [[nodiscard]] auto& file(tr_file_index_t i)
+    [[nodiscard]] char const* fileSubpath(tr_file_index_t i) const
     {
         TR_ASSERT(i < this->fileCount());
 
-        return info.files[i];
+        return info.files[i].name ? info.files[i].name : "";
     }
 
-    [[nodiscard]] auto const& file(tr_file_index_t i) const
+    [[nodiscard]] auto fileSize(tr_file_index_t i) const
     {
         TR_ASSERT(i < this->fileCount());
 
-        return info.files[i];
+        return info.files[i].length;
     }
+
+    void setFileSubpath(tr_file_index_t i, std::string_view subpath);
 
     struct tr_found_file_t : public tr_sys_path_info
     {
@@ -749,7 +751,7 @@ void tr_torrentGotBlock(tr_torrent* tor, tr_block_index_t blockIndex);
 /**
  * @brief Like tr_torrentFindFile(), but splits the filename into base and subpath.
  *
- * If the file is found, "tr_buildPath(base, subpath, nullptr)"
+ * If the file is found, "tr_strvPath(base, subpath, nullptr)"
  * will generate the complete filename.
  *
  * @return true if the file is found, false otherwise.
