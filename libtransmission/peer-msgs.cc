@@ -12,7 +12,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <iostream>
 #include <memory> // std::unique_ptr
 #include <optional>
 
@@ -1058,10 +1057,10 @@ static void sendLtepHandshake(tr_peerMsgsImpl* msgs)
     // It also adds "metadata_size" to the handshake message (not the
     // "m" dictionary) specifying an integer value of the number of
     // bytes of the metadata.
-    auto const info_dict_length = msgs->torrent->infoDictLength();
-    if (allow_metadata_xfer && msgs->torrent->hasMetadata() && info_dict_length > 0)
+    auto const info_dict_size = msgs->torrent->infoDictSize();
+    if (allow_metadata_xfer && msgs->torrent->hasMetadata() && info_dict_size > 0)
     {
-        tr_variantDictAddInt(&val, TR_KEY_metadata_size, info_dict_length);
+        tr_variantDictAddInt(&val, TR_KEY_metadata_size, info_dict_size);
     }
 
     // http://bittorrent.org/beps/bep_0010.html
@@ -2032,7 +2031,7 @@ static void updateDesiredRequestCount(tr_peerMsgsImpl* msgs)
          * many requests we should send to this peer */
         size_t constexpr Floor = 32;
         size_t constexpr Seconds = RequestBufSecs;
-        size_t const estimated_blocks_in_period = (rate_Bps * Seconds) / torrent->block_size;
+        size_t const estimated_blocks_in_period = (rate_Bps * Seconds) / torrent->blockSize();
         size_t const ceil = msgs->reqq ? *msgs->reqq : 250;
         msgs->desired_request_count = std::clamp(estimated_blocks_in_period, Floor, ceil);
     }
@@ -2150,7 +2149,7 @@ static size_t fillOutputBuffer(tr_peerMsgsImpl* msgs, time_t now)
             tr_variantInitDict(&tmp, 3);
             tr_variantDictAddInt(&tmp, TR_KEY_msg_type, METADATA_MSG_TYPE_DATA);
             tr_variantDictAddInt(&tmp, TR_KEY_piece, piece);
-            tr_variantDictAddInt(&tmp, TR_KEY_total_size, msgs->torrent->infoDictLength());
+            tr_variantDictAddInt(&tmp, TR_KEY_total_size, msgs->torrent->infoDictSize());
             evbuffer* const payload = tr_variantToBuf(&tmp, TR_VARIANT_FMT_BENC);
 
             /* write it out as a LTEP message to our outMessages buffer */
@@ -2197,7 +2196,7 @@ static size_t fillOutputBuffer(tr_peerMsgsImpl* msgs, time_t now)
     ***  Data Blocks
     **/
 
-    if (tr_peerIoGetWriteBufferSpace(msgs->io, now) >= msgs->torrent->block_size && popNextRequest(msgs, &req))
+    if (tr_peerIoGetWriteBufferSpace(msgs->io, now) >= msgs->torrent->blockSize() && popNextRequest(msgs, &req))
     {
         --msgs->prefetchCount;
 

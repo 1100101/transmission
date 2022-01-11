@@ -41,35 +41,90 @@ public:
     // load multiple files.
     bool parseTorrentFile(std::string_view benc_filename, std::vector<char>* buffer = nullptr, tr_error** error = nullptr);
 
-    auto const& blockInfo() const
+    /// BLOCK INFO
+
+    [[nodiscard]] constexpr auto const& blockInfo() const
     {
         return block_info_;
     }
-    auto pieceCount() const
+
+    [[nodiscard]] constexpr auto blockCount() const
     {
-        return block_info_.n_pieces;
+        return blockInfo().blockCount();
     }
-    auto pieceSize() const
+    [[nodiscard]] constexpr auto blockOf(uint64_t offset) const
     {
-        return block_info_.piece_size;
+        return blockInfo().blockOf(offset);
     }
-    auto totalSize() const
+    [[nodiscard]] constexpr auto blockOf(tr_piece_index_t piece, uint32_t offset, uint32_t length = 0) const
     {
-        return block_info_.total_size;
+        return blockInfo().blockOf(piece, offset, length);
     }
+    [[nodiscard]] constexpr auto blockSize() const
+    {
+        return blockInfo().blockSize();
+    }
+    [[nodiscard]] constexpr auto blockSize(tr_block_index_t block) const
+    {
+        return blockInfo().blockSize(block);
+    }
+    [[nodiscard]] constexpr auto blockSpanForPiece(tr_piece_index_t piece) const
+    {
+        return blockInfo().blockSpanForPiece(piece);
+    }
+    [[nodiscard]] constexpr auto offset(tr_piece_index_t piece, uint32_t offset, uint32_t length = 0) const
+    {
+        return blockInfo().offset(piece, offset, length);
+    }
+    [[nodiscard]] constexpr auto pieceCount() const
+    {
+        return blockInfo().pieceCount();
+    }
+    [[nodiscard]] constexpr auto pieceForBlock(tr_block_index_t block) const
+    {
+        return blockInfo().pieceForBlock(block);
+    }
+    [[nodiscard]] constexpr auto pieceOf(uint64_t offset) const
+    {
+        return blockInfo().pieceOf(offset);
+    }
+    [[nodiscard]] constexpr auto pieceSize() const
+    {
+        return blockInfo().pieceSize();
+    }
+    [[nodiscard]] constexpr auto pieceSize(tr_piece_index_t piece) const
+    {
+        return blockInfo().pieceSize(piece);
+    }
+    [[nodiscard]] constexpr auto totalSize() const
+    {
+        return blockInfo().totalSize();
+    }
+
     auto const& comment() const
     {
         return comment_;
     }
-
     auto const& creator() const
     {
         return creator_;
     }
-
-    auto const& files() const
+    [[nodiscard]] auto const& source() const
     {
-        return files_;
+        return source_;
+    }
+
+    auto fileCount() const
+    {
+        return std::size(files_);
+    }
+    std::string const& fileSubpath(tr_file_index_t i) const
+    {
+        return files_.at(i).path();
+    }
+    auto fileSize(tr_file_index_t i) const
+    {
+        return files_.at(i).size();
     }
 
     [[nodiscard]] auto const& isPrivate() const
@@ -77,17 +132,12 @@ public:
         return is_private_;
     }
 
-    [[nodiscard]] auto const& parsedTorrentFile() const
+    [[nodiscard]] auto const& torrentFile() const
     {
         return torrent_file_;
     }
 
     [[nodiscard]] tr_sha1_digest_t const& pieceHash(tr_piece_index_t piece) const;
-
-    [[nodiscard]] auto const& source() const
-    {
-        return source_;
-    }
 
     [[nodiscard]] auto const& dateCreated() const
     {
@@ -123,20 +173,20 @@ private:
         {
             return path_;
         }
-        uint64_t length() const
+        uint64_t size() const
         {
-            return length_;
+            return size_;
         }
 
-        file_t(std::string_view path, uint64_t length)
+        file_t(std::string_view path, uint64_t size)
             : path_{ path }
-            , length_{ length }
+            , size_{ size }
         {
         }
 
     private:
         std::string path_;
-        uint64_t length_ = 0;
+        uint64_t size_ = 0;
     };
 
     tr_block_info block_info_ = tr_block_info{ 0, 0 };

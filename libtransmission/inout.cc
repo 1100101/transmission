@@ -123,7 +123,7 @@ static int readOrWriteBytes(
             if (!tr_sys_file_read_at(fd, buf, buflen, file_offset, nullptr, &error))
             {
                 err = error->code;
-                tr_logAddTorErr(tor, "read failed for \"%s\": %s", tor->fileSubpath(file_index), error->message);
+                tr_logAddTorErr(tor, "read failed for \"%s\": %s", tor->fileSubpath(file_index).c_str(), error->message);
                 tr_error_free(error);
             }
         }
@@ -132,7 +132,7 @@ static int readOrWriteBytes(
             if (!tr_sys_file_write_at(fd, buf, buflen, file_offset, nullptr, &error))
             {
                 err = error->code;
-                tr_logAddTorErr(tor, "write failed for \"%s\": %s", tor->fileSubpath(file_index), error->message);
+                tr_logAddTorErr(tor, "write failed for \"%s\": %s", tor->fileSubpath(file_index).c_str(), error->message);
                 tr_error_free(error);
             }
         }
@@ -211,12 +211,12 @@ static std::optional<tr_sha1_digest_t> recalculateHash(tr_torrent* tor, tr_piece
     TR_ASSERT(tor != nullptr);
     TR_ASSERT(piece < tor->pieceCount());
 
-    auto bytes_left = size_t{ tor->pieceSize(piece) };
+    auto bytes_left = size_t(tor->pieceSize(piece));
     auto offset = uint32_t{};
     tr_ioPrefetch(tor, piece, offset, bytes_left);
 
     auto sha = tr_sha1_init();
-    auto buffer = std::vector<uint8_t>(tor->block_size);
+    auto buffer = std::vector<uint8_t>(tor->blockSize());
     while (bytes_left != 0)
     {
         size_t const len = std::min(bytes_left, std::size(buffer));

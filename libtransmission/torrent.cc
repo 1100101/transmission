@@ -77,7 +77,7 @@ using namespace std::literals;
 
 char const* tr_torrentName(tr_torrent const* tor)
 {
-    return tor != nullptr ? tor->info.name : "";
+    return tor != nullptr ? tor->name().c_str() : "";
 }
 
 uint64_t tr_torrentTotalSize(tr_torrent const* tor)
@@ -561,8 +561,8 @@ static void tr_torrentFireMetadataCompleted(tr_torrent* tor);
 
 static void torrentInitFromInfoDict(tr_torrent* tor)
 {
-    tor->initSizes(tor->totalSize(), tor->pieceSize());
-    tor->completion = tr_completion{ tor, tor };
+    tor->block_info.initSizes(tor->info.totalSize(), tor->info.pieceSize());
+    tor->completion = tr_completion{ tor, &tor->block_info };
     auto const obfuscated = tr_sha1("req2"sv, tor->infoHash());
     if (obfuscated)
     {
@@ -579,7 +579,7 @@ static void torrentInitFromInfoDict(tr_torrent* tor)
     tor->file_mtimes_.resize(tor->fileCount());
     tor->file_priorities_.reset(&tor->fpm_);
     tor->files_wanted_.reset(&tor->fpm_);
-    tor->checked_pieces_ = tr_bitfield{ tor->pieceCount() };
+    tor->checked_pieces_ = tr_bitfield{ size_t(tor->pieceCount()) };
 }
 
 void tr_torrentGotNewInfoDict(tr_torrent* tor)
@@ -631,6 +631,29 @@ static void callScriptIfEnabled(tr_torrent const* tor, TrScript type)
 }
 
 static void refreshCurrentDir(tr_torrent* tor);
+
+static void migrateFile(
+    tr_torrent const* tor,
+    tr_magnet_metainfo::BasenameFormat old_format,
+    tr_magnet_metainfo::BasenameFormat new_format)
+{
+    auto const torrent_dir = tor->session->torrent_dir;
+    auto const& name = tor->name();
+    auto const& hash_string = tor->infoHashString();
+    auto const suffix = "torrent"sv;
+
+    auto const old_filename = tr_magnet_metainfo::makeFilename(torrent_dir, name, hash_string, old_format, suffix);
+    auto const new_filename = tr_magnet_metainfo::makeFilename(torrent_dir, name, hash_string, new_format, suffix);
+
+    if (tr_sys_path_rename(old_filename.c_str(), new_filename.c_str(), nullptr))
+    {
+        tr_logAddNamedError(
+            tor->name().c_str(),
+            "Migrated torrent file from \"%s\" to \"%s\"",
+            old_filename.c_str(),
+            new_filename.c_str());
+    }
+}
 
 static void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
 {
@@ -702,7 +725,7 @@ static void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
     if (didRenameResumeFileToHashOnlyName)
     {
         /* Rename torrent file as well */
-        tr_metainfoMigrateFile(session, &tor->info, TR_METAINFO_BASENAME_NAME_AND_PARTIAL_HASH, TR_METAINFO_BASENAME_HASH);
+        migrateFile(tor, tr_magnet_metainfo::BasenameFormat::NameAndPartialHash, tr_magnet_metainfo::BasenameFormat::Hash);
     }
 
     tor->completeness = tor->completion.status();
@@ -740,7 +763,7 @@ static void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
     tr_sessionAddTorrent(session, tor);
 
     /* if we don't have a local .torrent file already, assume the torrent is new */
-    bool const isNewTorrent = !tr_sys_path_exists(tor->torrentFile(), nullptr);
+    bool const isNewTorrent = !tr_sys_path_exists(tor->torrentFile().c_str(), nullptr);
 
     /* maybe save our own copy of the metainfo */
     if (tr_ctorGetSave(ctor))
@@ -787,26 +810,40 @@ tr_torrent* tr_torrentNew(tr_ctor const* ctor, tr_torrent** setme_duplicate_of)
     TR_ASSERT(tr_isSession(session));
 
     // is the metainfo valid?
-    auto top = tr_variant{};
-    if (!tr_variantFromBuf(&top, TR_VARIANT_PARSE_BENC, tr_ctorGetContents(ctor), nullptr, nullptr))
-    {
-        return nullptr;
-    }
-    auto parsed = tr_metainfoParse(session, &top, nullptr);
-    tr_variantFree(&top);
-    if (!parsed)
+    auto const* metainfo = tr_ctorGetMetainfo(ctor);
+    if (metainfo == nullptr)
     {
         return nullptr;
     }
 
     // is it a duplicate?
-    if (auto* const duplicate_of = session->getTorrent(parsed->info.hash); duplicate_of != nullptr)
+    if (auto* const duplicate_of = session->getTorrent(metainfo->infoHash()); duplicate_of != nullptr)
     {
         if (setme_duplicate_of != nullptr)
         {
             *setme_duplicate_of = duplicate_of;
         }
 
+        return nullptr;
+    }
+
+    // build a variant to parse
+    auto top_variant = tr_variant{};
+    if (std::empty(*metainfo))
+    {
+        metainfo->toVariant(&top_variant);
+    }
+    else
+    {
+        tr_variantFromBuf(&top_variant, TR_VARIANT_PARSE_BENC, tr_ctorGetContents(ctor), nullptr, nullptr);
+    }
+
+    // parse the metainfo
+    tr_error* error = nullptr;
+    auto parsed = tr_metainfoParse(session, &top_variant, &error);
+    tr_variantFree(&top_variant);
+    if (!parsed)
+    {
         return nullptr;
     }
 
@@ -1122,18 +1159,18 @@ tr_file_view tr_torrentFile(tr_torrent const* tor, tr_file_index_t i)
 {
     TR_ASSERT(tr_isTorrent(tor));
 
-    auto const* subpath = tor->fileSubpath(i);
+    auto const& subpath = tor->fileSubpath(i);
     auto const priority = tor->file_priorities_.filePriority(i);
     auto const wanted = tor->files_wanted_.fileWanted(i);
     auto const length = tor->fileSize(i);
 
     if (tor->completeness == TR_SEED || length == 0)
     {
-        return { subpath, length, length, 1.0, priority, wanted };
+        return { subpath.c_str(), length, length, 1.0, priority, wanted };
     }
 
     auto const have = tor->completion.countHasBytesInSpan(tor->fpm_.byteSpan(i));
-    return { subpath, have, length, have >= length ? 1.0 : have / double(length), priority, wanted };
+    return { subpath.c_str(), have, length, have >= length ? 1.0 : have / double(length), priority, wanted };
 }
 
 size_t tr_torrentFileCount(tr_torrent const* torrent)
@@ -1171,17 +1208,17 @@ tr_torrent_view tr_torrentView(tr_torrent const* tor)
 
     auto ret = tr_torrent_view{};
     ret.name = tr_torrentName(tor);
-    ret.hash_string = tor->infoHashString();
-    ret.torrent_filename = tor->torrentFile();
-    ret.comment = tor->info.comment;
-    ret.creator = tor->info.creator;
-    ret.source = tor->info.source;
+    ret.hash_string = tor->infoHashString().c_str();
+    ret.torrent_filename = tor->torrentFile().c_str();
+    ret.comment = tor->comment().c_str();
+    ret.creator = tor->creator().c_str();
+    ret.source = tor->source().c_str();
     ret.total_size = tor->totalSize();
-    ret.date_created = tor->info.dateCreated;
+    ret.date_created = tor->dateCreated();
     ret.piece_size = tor->pieceSize();
     ret.n_pieces = tor->pieceCount();
     ret.is_private = tor->isPrivate();
-    ret.is_folder = tor->info.isFolder;
+    ret.is_folder = tor->fileCount() > 1;
 
     return ret;
 }
@@ -1563,7 +1600,7 @@ static void closeTorrent(void* vtor)
 
     if (tor->isDeleting)
     {
-        tr_metainfoRemoveSaved(tor->session, &tor->info);
+        tr_sys_path_remove(tor->torrentFile().c_str(), nullptr);
         tr_torrentRemoveResume(tor);
     }
 
@@ -1946,7 +1983,7 @@ void tr_torrentGetBlockLocation(
     uint32_t* length)
 {
     uint64_t pos = block;
-    pos *= tor->block_size;
+    pos *= tor->blockSize();
     *piece = pos / tor->pieceSize();
     uint64_t piece_begin = tor->pieceSize();
     piece_begin *= *piece;
@@ -1996,7 +2033,7 @@ bool tr_torrentReqIsValid(tr_torrent const* tor, tr_piece_index_t index, uint32_
 }
 
 // TODO(ckerr) migrate to fpm?
-tr_block_span_t tr_torGetFileBlockSpan(tr_torrent const* tor, tr_file_index_t const i)
+tr_block_span_t tr_torGetFileBlockSpan(tr_torrent const* tor, tr_file_index_t i)
 {
     auto const [begin_byte, end_byte] = tor->fpm_.byteSpan(i);
 
@@ -2526,7 +2563,7 @@ static void tr_torrentFileCompleted(tr_torrent* tor, tr_file_index_t i)
     char* sub = nullptr;
     if (tr_torrentFindFile2(tor, i, &base, &sub, nullptr))
     {
-        if (char const* file_subpath = tor->fileSubpath(i); strcmp(sub, file_subpath) != 0)
+        if (auto const& file_subpath = tor->fileSubpath(i); file_subpath != sub)
         {
             auto const oldpath = tr_strvPath(base, sub);
             auto const newpath = tr_strvPath(base, file_subpath);
@@ -2871,26 +2908,21 @@ static bool renameArgsAreValid(char const* oldpath, char const* newname)
         strchr(newname, TR_PATH_DELIMITER) == nullptr;
 }
 
-static tr_file_index_t* renameFindAffectedFiles(tr_torrent* tor, char const* oldpath, size_t* setme_n)
+static auto renameFindAffectedFiles(tr_torrent* tor, std::string_view oldpath)
 {
+    auto indices = std::vector<tr_file_index_t>{};
+    auto oldpath_as_dir = tr_strvJoin(oldpath, "/"sv);
     auto const n_files = tor->fileCount();
-    auto n_affected_files = size_t{};
-    auto* const indices = tr_new0(tr_file_index_t, n_files);
-
-    auto const oldpath_len = strlen(oldpath);
 
     for (tr_file_index_t i = 0; i < n_files; ++i)
     {
-        char const* name = tor->fileSubpath(i);
-        size_t const len = strlen(name);
-
-        if ((len == oldpath_len || (len > oldpath_len && name[oldpath_len] == '/')) && memcmp(oldpath, name, oldpath_len) == 0)
+        auto const& name = tor->fileSubpath(i);
+        if (name == oldpath || tr_strvStartsWith(name, oldpath_as_dir))
         {
-            indices[n_affected_files++] = i;
+            indices.push_back(i);
         }
     }
 
-    *setme_n = n_affected_files;
     return indices;
 }
 
@@ -3012,10 +3044,8 @@ static void torrentRenamePath(void* vdata)
     }
     else
     {
-        auto n = size_t{};
-        tr_file_index_t* const file_indices = renameFindAffectedFiles(tor, oldpath, &n);
-
-        if (n == 0)
+        auto const file_indices = renameFindAffectedFiles(tor, oldpath);
+        if (std::empty(file_indices))
         {
             error = EINVAL;
         }
@@ -3026,13 +3056,13 @@ static void torrentRenamePath(void* vdata)
             if (error == 0)
             {
                 /* update tr_info.files */
-                for (size_t i = 0; i < n; ++i)
+                for (auto const& file_index : file_indices)
                 {
-                    renameTorrentFileString(tor, oldpath, newname, file_indices[i]);
+                    renameTorrentFileString(tor, oldpath, newname, file_index);
                 }
 
                 /* update tr_info.name if user changed the toplevel */
-                if (n == tor->fileCount() && strchr(oldpath, '/') == nullptr)
+                if (std::size(file_indices) == tor->fileCount() && strchr(oldpath, '/') == nullptr)
                 {
                     tor->setName(newname);
                 }
@@ -3041,8 +3071,6 @@ static void torrentRenamePath(void* vdata)
                 tor->setDirty();
             }
         }
-
-        tr_free(file_indices);
     }
 
     /***
@@ -3096,7 +3124,7 @@ void tr_torrent::swapMetainfo(tr_metainfo_parsed& parsed)
 {
     std::swap(this->info, parsed.info);
     std::swap(this->piece_checksums_, parsed.pieces);
-    std::swap(this->info_dict_length, parsed.info_dict_length);
+    std::swap(this->info_dict_size, parsed.info_dict_size);
 }
 
 void tr_torrentSetFilePriorities(
@@ -3136,21 +3164,15 @@ void tr_torrent::setBlocks(tr_bitfield blocks)
 
 void tr_torrent::setName(std::string_view name)
 {
-    if (name == this->info.name)
-    {
-        return;
-    }
-
-    tr_free(this->info.name);
-    this->info.name = tr_strvDup(name);
+    this->info.setName(name);
 }
 
 void tr_torrent::setFileSubpath(tr_file_index_t i, std::string_view subpath)
 {
-    if (fileSubpath(i) != subpath)
-    {
-        auto* old = this->info.files[i].name;
-        this->info.files[i].name = tr_strvDup(subpath);
-        tr_free(old);
-    }
+    this->info.setFileSubpath(i, subpath);
+}
+
+void tr_info::setAnnounceList(tr_announce_list const& list)
+{
+    this->announce_list = std::make_shared<tr_announce_list>(list);
 }

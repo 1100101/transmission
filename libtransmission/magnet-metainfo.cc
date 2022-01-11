@@ -239,14 +239,14 @@ void tr_magnet_metainfo::toVariant(tr_variant* top) const
     }
 
     // webseeds
-    n = std::size(this->webseeds());
+    n = this->webseedCount();
     if (n != 0)
     {
         tr_variant* list = tr_variantDictAddList(top, TR_KEY_url_list, n);
 
-        for (auto& url : this->webseeds())
+        for (size_t i = 0; i < n; ++i)
         {
-            tr_variantListAddStr(list, url);
+            tr_variantListAddStr(list, this->webseed(i));
         }
     }
 
@@ -259,4 +259,17 @@ void tr_magnet_metainfo::toVariant(tr_variant* top) const
     {
         tr_variantDictAddStr(d, TR_KEY_display_name, this->name());
     }
+}
+
+std::string tr_magnet_metainfo::makeFilename(
+    std::string_view dirname,
+    std::string_view name,
+    std::string_view info_hash_string,
+    BasenameFormat format,
+    std::string_view suffix)
+{
+    // `${dirname}/${name}.${info_hash}${suffix}`
+    // `${dirname}/${info_hash}${suffix}`
+    return format == BasenameFormat::Hash ? tr_strvJoin(dirname, "/"sv, info_hash_string, suffix) :
+                                            tr_strvJoin(dirname, "/"sv, name, "."sv, info_hash_string.substr(0, 16), suffix);
 }

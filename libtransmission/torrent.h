@@ -86,7 +86,7 @@ void tr_torrentGetBlockLocation(
     uint32_t* offset,
     uint32_t* length);
 
-tr_block_span_t tr_torGetFileBlockSpan(tr_torrent const* tor, tr_file_index_t const file);
+tr_block_span_t tr_torGetFileBlockSpan(tr_torrent const* tor, tr_file_index_t file);
 
 void tr_torrentCheckSeedLimit(tr_torrent* tor);
 
@@ -105,18 +105,16 @@ tr_torrent_activity tr_torrentGetActivity(tr_torrent const* tor);
 struct tr_incomplete_metadata;
 
 /** @brief Torrent object */
-struct tr_torrent
-    : public tr_block_info
-    , public tr_completion::torrent_view
+struct tr_torrent : public tr_completion::torrent_view
 {
 public:
-    tr_torrent(tr_info const& inf)
-        : tr_block_info{ inf.totalSize, inf.pieceSize }
-        , completion{ this, this }
+    explicit tr_torrent(tr_info const& inf)
+        : block_info{ inf.totalSize(), inf.pieceSize() }
+        , completion{ this, &this->block_info }
     {
     }
 
-    virtual ~tr_torrent() override = default;
+    ~tr_torrent() override = default;
 
     void setLocation(
         std::string_view location,
@@ -153,6 +151,66 @@ public:
     void setSpeedLimitBps(tr_direction, unsigned int Bps);
 
     unsigned int speedLimitBps(tr_direction) const;
+
+    /// BLOCK INFO
+
+    [[nodiscard]] constexpr auto const& blockInfo() const
+    {
+        return block_info;
+    }
+
+    [[nodiscard]] constexpr auto blockCount() const
+    {
+        return blockInfo().blockCount();
+    }
+    [[nodiscard]] constexpr auto blockOf(uint64_t offset) const
+    {
+        return blockInfo().blockOf(offset);
+    }
+    [[nodiscard]] constexpr auto blockOf(tr_piece_index_t piece, uint32_t offset, uint32_t length = 0) const
+    {
+        return blockInfo().blockOf(piece, offset, length);
+    }
+    [[nodiscard]] constexpr auto blockSize() const
+    {
+        return blockInfo().blockSize();
+    }
+    [[nodiscard]] constexpr auto blockSize(tr_block_index_t block) const
+    {
+        return blockInfo().blockSize(block);
+    }
+    [[nodiscard]] constexpr auto blockSpanForPiece(tr_piece_index_t piece) const
+    {
+        return blockInfo().blockSpanForPiece(piece);
+    }
+    [[nodiscard]] constexpr auto offset(tr_piece_index_t piece, uint32_t offset, uint32_t length = 0) const
+    {
+        return blockInfo().offset(piece, offset, length);
+    }
+    [[nodiscard]] constexpr auto pieceCount() const
+    {
+        return blockInfo().pieceCount();
+    }
+    [[nodiscard]] constexpr auto pieceForBlock(tr_block_index_t block) const
+    {
+        return blockInfo().pieceForBlock(block);
+    }
+    [[nodiscard]] constexpr auto pieceOf(uint64_t offset) const
+    {
+        return blockInfo().pieceOf(offset);
+    }
+    [[nodiscard]] constexpr auto pieceSize() const
+    {
+        return blockInfo().pieceSize();
+    }
+    [[nodiscard]] constexpr auto pieceSize(tr_piece_index_t piece) const
+    {
+        return blockInfo().pieceSize(piece);
+    }
+    [[nodiscard]] constexpr auto totalSize() const
+    {
+        return blockInfo().totalSize();
+    }
 
     /// COMPLETION
 
@@ -314,21 +372,17 @@ public:
 
     [[nodiscard]] tr_file_index_t fileCount() const
     {
-        return info.fileCount;
+        return std::size(info.files);
     }
 
-    [[nodiscard]] char const* fileSubpath(tr_file_index_t i) const
+    [[nodiscard]] std::string const& fileSubpath(tr_file_index_t i) const
     {
-        TR_ASSERT(i < this->fileCount());
-
-        return info.files[i].name ? info.files[i].name : "";
+        return info.fileSubpath(i);
     }
 
     [[nodiscard]] auto fileSize(tr_file_index_t i) const
     {
-        TR_ASSERT(i < this->fileCount());
-
-        return info.files[i].length;
+        return info.fileSize(i);
     }
 
     void setFileSubpath(tr_file_index_t i, std::string_view subpath);
@@ -352,86 +406,6 @@ public:
 
     /// METAINFO - TRACKERS
 
-    [[nodiscard]] auto trackerCount() const
-    {
-        return std::size(*info.announce_list);
-    }
-
-    [[nodiscard]] auto const& tracker(size_t i) const
-    {
-        return info.announce_list->at(i);
-    }
-
-    [[nodiscard]] auto tiers() const
-    {
-        return info.announce_list->tiers();
-    }
-
-    /// METAINFO - WEBSEEDS
-
-    [[nodiscard]] auto webseedCount() const
-    {
-        return info.webseedCount;
-    }
-
-    [[nodiscard]] auto const& webseed(size_t i) const
-    {
-        TR_ASSERT(i < webseedCount());
-
-        return info.webseeds[i];
-    }
-
-    [[nodiscard]] auto& webseed(size_t i)
-    {
-        TR_ASSERT(i < webseedCount());
-
-        return info.webseeds[i];
-    }
-
-    /// METAINFO - OTHER
-
-    void setName(std::string_view name);
-
-    [[nodiscard]] auto const& infoHash() const
-    {
-        return this->info.hash;
-    }
-
-    [[nodiscard]] auto isPrivate() const
-    {
-        return this->info.isPrivate;
-    }
-
-    [[nodiscard]] auto isPublic() const
-    {
-        return !this->isPrivate();
-    }
-
-    [[nodiscard]] auto pieceCount() const
-    {
-        return this->info.pieceCount;
-    }
-
-    [[nodiscard]] auto pieceSize() const
-    {
-        return this->info.pieceSize;
-    }
-
-    [[nodiscard]] auto pieceSize(tr_piece_index_t i) const
-    {
-        return tr_block_info::pieceSize(i);
-    }
-
-    [[nodiscard]] auto totalSize() const
-    {
-        return this->info.totalSize;
-    }
-
-    [[nodiscard]] auto infoHashString() const
-    {
-        return this->info.hashString;
-    }
-
     [[nodiscard]] auto const& announceList() const
     {
         return *this->info.announce_list;
@@ -442,9 +416,85 @@ public:
         return *this->info.announce_list;
     }
 
+    [[nodiscard]] auto trackerCount() const
+    {
+        return std::size(this->announceList());
+    }
+
+    [[nodiscard]] auto const& tracker(size_t i) const
+    {
+        return this->announceList().at(i);
+    }
+
+    [[nodiscard]] auto tiers() const
+    {
+        return this->announceList().tiers();
+    }
+
+    /// METAINFO - WEBSEEDS
+
+    [[nodiscard]] auto webseedCount() const
+    {
+        return info.webseedCount();
+    }
+
+    [[nodiscard]] auto const& webseed(size_t i) const
+    {
+        return info.webseed(i);
+    }
+
+    /// METAINFO - OTHER
+
+    void setName(std::string_view name);
+
+    [[nodiscard]] auto const& name() const
+    {
+        return this->info.name();
+    }
+
+    [[nodiscard]] auto const& infoHash() const
+    {
+        return this->info.infoHash();
+    }
+
+    [[nodiscard]] auto isPrivate() const
+    {
+        return this->info.isPrivate();
+    }
+
+    [[nodiscard]] auto isPublic() const
+    {
+        return !this->isPrivate();
+    }
+
+    [[nodiscard]] auto const& infoHashString() const
+    {
+        return this->info.infoHashString();
+    }
+
+    [[nodiscard]] auto dateCreated() const
+    {
+        return this->info.dateCreated();
+    }
+
     [[nodiscard]] auto const& torrentFile() const
     {
-        return this->info.torrent;
+        return this->info.torrentFile();
+    }
+
+    [[nodiscard]] auto const& comment() const
+    {
+        return this->info.comment();
+    }
+
+    [[nodiscard]] auto const& creator() const
+    {
+        return this->info.creator();
+    }
+
+    [[nodiscard]] auto const& source() const
+    {
+        return this->info.source();
     }
 
     [[nodiscard]] auto hasMetadata() const
@@ -452,9 +502,14 @@ public:
         return fileCount() > 0;
     }
 
-    [[nodiscard]] auto infoDictLength() const
+    [[nodiscard]] auto infoDictSize() const
     {
-        return this->info_dict_length;
+        return this->info_dict_size;
+    }
+
+    [[nodiscard]] auto infoDictOffset() const
+    {
+        return this->info_dict_offset;
     }
 
     /// METAINFO - CHECKSUMS
@@ -559,6 +614,8 @@ public:
 
     tr_bitfield checked_pieces_ = tr_bitfield{ 0 };
 
+    tr_block_info block_info;
+
     // TODO(ckerr): make private once some of torrent.cc's `tr_torrentFoo()` methods are member functions
     tr_completion completion;
 
@@ -613,13 +670,15 @@ public:
     tr_interned_string current_dir;
 
     /* Length, in bytes, of the "info" dict in the .torrent file. */
-    uint64_t info_dict_length = 0;
+    uint64_t info_dict_size = 0;
 
     /* Offset, in bytes, of the beginning of the "info" dict in the .torrent file.
      *
      * Used by the torrent-magnet code for serving metainfo to peers.
      * This field is lazy-generated and might not be initialized yet. */
-    size_t infoDictOffset = 0;
+    uint64_t info_dict_offset = 0;
+
+    bool info_dict_offset_is_cached = false;
 
     tr_completeness completeness = TR_LEECH;
 
@@ -678,9 +737,6 @@ public:
 
     bool prefetchMagnetMetadata = false;
     bool magnetVerify = false;
-
-    // TODO(ckerr) use std::optional
-    bool infoDictOffsetIsCached = false;
 
     void setDirty()
     {

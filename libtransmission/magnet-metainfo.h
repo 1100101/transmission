@@ -34,9 +34,15 @@ public:
     {
         return name_;
     }
-    auto const& webseeds() const
+
+    auto webseedCount() const
     {
-        return webseed_urls_;
+        return std::size(webseed_urls_);
+    }
+
+    auto const& webseed(size_t i) const
+    {
+        return webseed_urls_[i];
     }
 
     auto& announceList()
@@ -62,6 +68,24 @@ public:
     }
 
     void toVariant(tr_variant* top) const;
+
+    enum class BasenameFormat
+    {
+        Hash,
+        NameAndPartialHash
+    };
+
+    static std::string makeFilename(
+        std::string_view dirname,
+        std::string_view name,
+        std::string_view info_hash_string,
+        BasenameFormat format,
+        std::string_view suffix);
+
+    std::string makeFilename(std::string_view dirname, BasenameFormat format, std::string_view suffix) const
+    {
+        return makeFilename(dirname, name(), infoHashString(), format, suffix);
+    }
 
 protected:
     tr_announce_list announce_list_;

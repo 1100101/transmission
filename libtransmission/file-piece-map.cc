@@ -53,10 +53,13 @@ void tr_file_piece_map::reset(tr_block_info const& block_info, uint64_t const* f
 
 void tr_file_piece_map::reset(tr_info const& info)
 {
-    tr_file_index_t const n = info.fileCount;
+    auto const n = info.fileCount();
     auto file_sizes = std::vector<uint64_t>(n);
-    std::transform(info.files, info.files + n, std::begin(file_sizes), [](tr_file const& file) { return file.length; });
-    reset({ info.totalSize, info.pieceSize }, std::data(file_sizes), std::size(file_sizes));
+    for (tr_file_index_t i = 0; i < n; ++i)
+    {
+        file_sizes[i] = info.fileSize(i);
+    }
+    reset({ info.totalSize(), info.pieceSize() }, std::data(file_sizes), std::size(file_sizes));
 }
 
 tr_file_piece_map::piece_span_t tr_file_piece_map::pieceSpan(tr_file_index_t file) const
