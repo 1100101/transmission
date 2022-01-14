@@ -24,10 +24,12 @@ const mem_formatters = [
 const fmt_kBps = new Intl.NumberFormat(current_locale, {
   style: 'unit',
   unit: 'kilobyte-per-second',
+  maximumFractionDigits: 2,
 });
 const fmt_MBps = new Intl.NumberFormat(current_locale, {
   style: 'unit',
   unit: 'megabyte-per-second',
+  maximumFractionDigits: 2,
 });
 
 export const Formatter = {
