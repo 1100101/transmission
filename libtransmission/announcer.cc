@@ -1,5 +1,5 @@
 // This file Copyright © 2010-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -236,6 +236,7 @@ struct tr_tracker
     explicit tr_tracker(tr_announcer* announcer, tr_announce_list::tracker_info const& info)
         : host{ info.host }
         , announce_url{ info.announce_str }
+        , sitename{ info.announce.sitename }
         , scrape_info{ std::empty(info.scrape_str) ? nullptr : tr_announcerGetScrapeInfo(announcer, info.scrape_str) }
         , id{ info.id }
     {
@@ -270,6 +271,7 @@ struct tr_tracker
 
     tr_interned_string const host;
     tr_interned_string const announce_url;
+    std::string_view const sitename;
     tr_scrape_info* const scrape_info;
 
     std::string tracker_id;
@@ -761,7 +763,7 @@ static void tier_announce_event_push(tr_tier* tier, tr_announce_event e, time_t 
          * dump everything leading up to it except "completed" */
         if (e == TR_ANNOUNCE_EVENT_STOPPED)
         {
-            bool has_completed = std::count(std::begin(events), std::end(events), TR_ANNOUNCE_EVENT_COMPLETED);
+            bool has_completed = std::count(std::begin(events), std::end(events), TR_ANNOUNCE_EVENT_COMPLETED) != 0;
             events.clear();
             if (has_completed)
             {
@@ -885,7 +887,7 @@ void tr_announcerRemoveTorrent(tr_announcer* announcer, tr_torrent* tor)
             auto const e = TR_ANNOUNCE_EVENT_STOPPED;
             auto* req = announce_request_new(announcer, tor, &tier, e);
 
-            if (announcer->stops.count(req))
+            if (announcer->stops.count(req) != 0U)
             {
                 delete req;
             }
@@ -1575,6 +1577,10 @@ static tr_tracker_view trackerView(tr_torrent const& tor, int tier_index, tr_tie
     view.host = tracker.host.c_str();
     view.announce = tracker.announce_url.c_str();
     view.scrape = tracker.scrape_info == nullptr ? "" : tracker.scrape_info->scrape_url.c_str();
+    *std::copy_n(
+        std::begin(tracker.sitename),
+        std::min(std::size(tracker.sitename), sizeof(view.sitename) - 1),
+        view.sitename) = '\0';
 
     view.id = tracker.id;
     view.tier = tier_index;
@@ -1593,8 +1599,8 @@ static tr_tracker_view trackerView(tr_torrent const& tor, int tier_index, tr_tie
     }
     else
     {
-        view.hasScraped = tier.lastScrapeTime;
-        if (view.hasScraped != 0)
+        view.hasScraped = tier.lastScrapeTime != 0;
+        if (view.hasScraped)
         {
             view.lastScrapeTime = tier.lastScrapeTime;
             view.lastScrapeSucceeded = tier.lastScrapeSucceeded;
@@ -1622,8 +1628,8 @@ static tr_tracker_view trackerView(tr_torrent const& tor, int tier_index, tr_tie
 
         view.lastAnnounceStartTime = tier.lastAnnounceStartTime;
 
-        view.hasAnnounced = tier.lastAnnounceTime;
-        if (view.hasAnnounced != 0)
+        view.hasAnnounced = tier.lastAnnounceTime != 0;
+        if (view.hasAnnounced)
         {
             view.lastAnnounceTime = tier.lastAnnounceTime;
             view.lastAnnounceSucceeded = tier.lastAnnounceSucceeded;

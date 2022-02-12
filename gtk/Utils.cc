@@ -1,5 +1,5 @@
 // This file Copyright © 2008-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -52,20 +52,20 @@ char const* const speed_T_str = N_("TB/s");
 ****
 ***/
 
-Glib::ustring gtr_get_unicode_string(int i)
+Glib::ustring gtr_get_unicode_string(GtrUnicode uni)
 {
-    switch (i)
+    switch (uni)
     {
-    case GTR_UNICODE_UP:
+    case GtrUnicode::Up:
         return "\xE2\x96\xB4";
 
-    case GTR_UNICODE_DOWN:
+    case GtrUnicode::Down:
         return "\xE2\x96\xBE";
 
-    case GTR_UNICODE_INF:
+    case GtrUnicode::Inf:
         return "\xE2\x88\x9E";
 
-    case GTR_UNICODE_BULLET:
+    case GtrUnicode::Bullet:
         return "\xE2\x88\x99";
 
     default:
@@ -75,7 +75,7 @@ Glib::ustring gtr_get_unicode_string(int i)
 
 Glib::ustring tr_strlratio(double ratio)
 {
-    return tr_strratio(ratio, gtr_get_unicode_string(GTR_UNICODE_INF).c_str());
+    return tr_strratio(ratio, gtr_get_unicode_string(GtrUnicode::Inf).c_str());
 }
 
 Glib::ustring tr_strlpercent(double x)
@@ -120,37 +120,6 @@ Glib::ustring tr_strltime(time_t seconds)
     else
     {
         return s;
-    }
-}
-
-/* pattern-matching text; ie, legaltorrents.com */
-Glib::ustring gtr_get_host_from_url(Glib::ustring const& url)
-{
-    Glib::ustring host;
-
-    if (auto const pch = url.find("://"); pch != Glib::ustring::npos)
-    {
-        auto const hostend = url.find_first_of(":/", pch + 3);
-        host = url.substr(pch + 3, hostend == Glib::ustring::npos ? hostend : (hostend - pch - 3));
-    }
-
-    if (tr_addressIsIP(host.c_str()))
-    {
-        return url;
-    }
-    else
-    {
-        auto const first_dot = host.find('.');
-        auto const last_dot = host.rfind('.');
-
-        if (first_dot != Glib::ustring::npos && last_dot != Glib::ustring::npos && first_dot != last_dot)
-        {
-            return host.substr(first_dot + 1);
-        }
-        else
-        {
-            return host;
-        }
     }
 }
 
@@ -516,9 +485,10 @@ void gtr_unrecognized_url_dialog(Gtk::Widget& parent, Glib::ustring const& url)
     auto w = std::make_shared<Gtk::MessageDialog>(
         *window,
         _("Unrecognized URL"),
-        false,
+        false /*use markup*/,
         Gtk::MESSAGE_ERROR,
-        Gtk::BUTTONS_CLOSE);
+        Gtk::BUTTONS_CLOSE,
+        true /*modal*/);
 
     gstr += gtr_sprintf(_("Transmission doesn't know how to use \"%s\""), url);
 

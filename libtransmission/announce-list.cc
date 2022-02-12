@@ -1,5 +1,5 @@
 // This file Copyright 2021-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -56,8 +56,7 @@ bool tr_announce_list::remove(tr_tracker_id_t id)
 
 bool tr_announce_list::replace(tr_tracker_id_t id, std::string_view announce_url_sv)
 {
-    auto const announce = tr_urlParseTracker(announce_url_sv);
-    if (!announce || !canAdd(*announce))
+    if (auto const announce = tr_urlParseTracker(announce_url_sv); !announce || !canAdd(*announce))
     {
         return false;
     }

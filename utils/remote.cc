@@ -1,5 +1,5 @@
 // This file Copyright © 2008-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -958,13 +958,15 @@ static void printDetails(tr_variant* top)
 
             if (tr_variantDictFindList(t, TR_KEY_labels, &l))
             {
+                printf("  Labels: ");
+
                 size_t child_pos = 0;
                 tr_variant const* child;
                 while ((child = tr_variantListChild(l, child_pos++)))
                 {
                     if (tr_variantGetStrView(child, &sv))
                     {
-                        printf(i == 0 ? "%" TR_PRIsv : ", %" TR_PRIsv, TR_PRIsv_ARG(sv));
+                        printf(child_pos == 1 ? "%" TR_PRIsv : ", %" TR_PRIsv, TR_PRIsv_ARG(sv));
                     }
                 }
 
@@ -1028,14 +1030,19 @@ static void printDetails(tr_variant* top)
 
             if (tr_variantDictFindInt(t, TR_KEY_downloadedEver, &i) && tr_variantDictFindInt(t, TR_KEY_uploadedEver, &j))
             {
-                printf("  Downloaded: %s\n", strlsize(i).c_str());
+                if (auto corrupt = int64_t{}; tr_variantDictFindInt(t, TR_KEY_corruptEver, &corrupt) && corrupt != 0)
+                {
+                    printf(
+                        "  Downloaded: %s (+%s discarded after failed checksum)\n",
+                        strlsize(i).c_str(),
+                        strlsize(corrupt).c_str());
+                }
+                else
+                {
+                    printf("  Downloaded: %s\n", strlsize(i).c_str());
+                }
                 printf("  Uploaded: %s\n", strlsize(j).c_str());
                 printf("  Ratio: %s\n", strlratio(j, i).c_str());
-            }
-
-            if (tr_variantDictFindInt(t, TR_KEY_corruptEver, &i))
-            {
-                printf("  Corrupt DL: %s\n", strlsize(i).c_str());
             }
 
             if (tr_variantDictFindStrView(t, TR_KEY_errorString, &sv) && !std::empty(sv) &&

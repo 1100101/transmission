@@ -1,5 +1,5 @@
 // This file Copyright © 2013-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -18,7 +18,7 @@ using namespace std::literals;
 namespace
 {
 
-auto constexpr my_static = std::array<std::string_view, 383>{ ""sv,
+auto constexpr my_static = std::array<std::string_view, 384>{ ""sv,
                                                               "activeTorrentCount"sv,
                                                               "activity-date"sv,
                                                               "activityDate"sv,
@@ -327,6 +327,7 @@ auto constexpr my_static = std::array<std::string_view, 383>{ ""sv,
                                                               "show-statusbar"sv,
                                                               "show-toolbar"sv,
                                                               "show-tracker-scrapes"sv,
+                                                              "sitename"sv,
                                                               "size-bytes"sv,
                                                               "size-units"sv,
                                                               "sizeWhenDone"sv,

@@ -1,5 +1,5 @@
 // This file Copyright © 2010-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -166,7 +166,7 @@ void OptionsDialog::Impl::updateTorrent()
         tr_torrentSetDownloadDir(tor_, downloadDir_.c_str());
         file_list_->set_sensitive(tr_torrentHasMetadata(tor_));
         file_list_->set_torrent(tr_torrentId(tor_));
-        tr_torrentVerify(tor_, nullptr, nullptr);
+        tr_torrentVerify(tor_);
     }
 }
 
