@@ -175,9 +175,6 @@ MainWindow::MainWindow(Session& session, Prefs& prefs, TorrentModel& model, bool
     ui_.action_QueueMoveDown->setIcon(icons.getThemeIcon(QStringLiteral("go-down"), QStyle::SP_ArrowDown));
     ui_.action_QueueMoveBottom->setIcon(icons.getThemeIcon(QStringLiteral("go-bottom")));
 
-    ui_.optionsButton->setIcon(icons.getThemeIcon(QStringLiteral("preferences-other")));
-    ui_.statsModeButton->setIcon(icons.getThemeIcon(QStringLiteral("view-statistics")));
-
     auto make_network_pixmap = [&icons](QString name, QSize size = { 16, 16 })
     {
         return icons.getThemeIcon(name, QStyle::SP_DriveNetIcon).pixmap(size);
@@ -1545,7 +1542,7 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event)
 
     if (mime->hasFormat(QStringLiteral("application/x-bittorrent")) || mime->hasUrls() ||
         mime->text().trimmed().endsWith(QStringLiteral(".torrent"), Qt::CaseInsensitive) ||
-        mime->text().startsWith(QStringLiteral("magnet:"), Qt::CaseInsensitive))
+        tr_magnet_metainfo{}.parseMagnet(mime->text().toStdString()))
     {
         event->acceptProposedAction();
     }
@@ -1591,19 +1588,17 @@ bool MainWindow::event(QEvent* e)
     }
 
     if (auto const text = QGuiApplication::clipboard()->text().trimmed();
-        text.endsWith(QStringLiteral(".torrent"), Qt::CaseInsensitive) ||
-        text.startsWith(QStringLiteral("magnet:"), Qt::CaseInsensitive))
+        text.endsWith(QStringLiteral(".torrent"), Qt::CaseInsensitive) || tr_magnet_metainfo{}.parseMagnet(text.toStdString()))
     {
-        for (QString const& entry : text.split(QLatin1Char('\n')))
+        for (auto const& entry : text.split(QLatin1Char('\n')))
         {
-            QString key = entry.trimmed();
-
+            auto key = entry.trimmed();
             if (key.isEmpty())
             {
                 continue;
             }
 
-            if (QUrl const url(key); url.isLocalFile())
+            if (auto const url = QUrl{ key }; url.isLocalFile())
             {
                 key = url.toLocalFile();
             }

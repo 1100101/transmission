@@ -18,7 +18,8 @@
 #include <libtransmission/utils.h> /* tr_wait_msec */
 #include <libtransmission/variant.h>
 #include <libtransmission/version.h>
-#include <libtransmission/web.h> /* tr_webRun */
+#include <libtransmission/web-utils.h>
+#include <libtransmission/web.h> // tr_sessionFetch()
 
 /***
 ****
@@ -123,16 +124,10 @@ static char* tr_strlratio(char* buf, double ratio, size_t buflen)
 
 static bool waitingOnWeb;
 
-static void onTorrentFileDownloaded(
-    tr_session* /*session*/,
-    bool /*did_connect*/,
-    bool /*did_timeout*/,
-    long /*response_code*/,
-    std::string_view response,
-    void* vctor)
+static void onTorrentFileDownloaded(tr_web::FetchResponse const& response)
 {
-    auto* ctor = static_cast<tr_ctor*>(vctor);
-    tr_ctorSetMetainfo(ctor, std::data(response), std::size(response), nullptr);
+    auto* ctor = static_cast<tr_ctor*>(response.user_data);
+    tr_ctorSetMetainfo(ctor, std::data(response.body), std::size(response.body), nullptr);
     waitingOnWeb = false;
 }
 
@@ -216,8 +211,6 @@ static char const* getConfigDir(int argc, char const** argv)
 
 int tr_main(int argc, char* argv[])
 {
-    tr_session* h;
-    tr_ctor* ctor;
     tr_variant settings;
     char const* configDir;
 
@@ -275,25 +268,20 @@ int tr_main(int argc, char* argv[])
         }
     }
 
-    h = tr_sessionInit(configDir, false, &settings);
-
-    ctor = tr_ctorNew(h);
+    auto* const h = tr_sessionInit(configDir, false, &settings);
+    auto* const ctor = tr_ctorNew(h);
 
     tr_ctorSetPaused(ctor, TR_FORCE, false);
 
-    if (tr_sys_path_exists(torrentPath, nullptr))
+    if (tr_ctorSetMetainfoFromFile(ctor, torrentPath, nullptr) || tr_ctorSetMetainfoFromMagnetLink(ctor, torrentPath, nullptr))
     {
-        tr_ctorSetMetainfoFromFile(ctor, torrentPath, nullptr);
+        // all good
     }
-    else if (memcmp(torrentPath, "magnet:?", 8) == 0)
+    else if (tr_urlIsValid(torrentPath))
     {
-        tr_ctorSetMetainfoFromMagnetLink(ctor, torrentPath, nullptr);
-    }
-    else if (memcmp(torrentPath, "http", 4) == 0)
-    {
-        tr_webRun(h, torrentPath, onTorrentFileDownloaded, ctor);
+        // fetch it
+        tr_sessionFetch(h, { torrentPath, onTorrentFileDownloaded, ctor });
         waitingOnWeb = true;
-
         while (waitingOnWeb)
         {
             tr_wait_msec(1000);

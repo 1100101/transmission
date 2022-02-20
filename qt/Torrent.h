@@ -121,12 +121,18 @@ public:
 
     explicit TorrentHash(char const* str)
     {
-        data_ = tr_sha1_from_string(str != nullptr ? str : "");
+        if (auto const hash = tr_sha1_from_string(str != nullptr ? str : ""); hash)
+        {
+            data_ = *hash;
+        }
     }
 
     explicit TorrentHash(QString const& str)
     {
-        data_ = tr_sha1_from_string(str.toStdString());
+        if (auto const hash = tr_sha1_from_string(str.toStdString()); hash)
+        {
+            data_ = *hash;
+        }
     }
 
     bool operator==(TorrentHash const& that) const
@@ -194,6 +200,11 @@ public:
     }
 
     QString getError() const;
+
+    QString trackerList() const
+    {
+        return tracker_list_;
+    }
 
     TorrentHash const& hash() const
     {
@@ -600,6 +611,7 @@ public:
         STATUS,
         TOTAL_SIZE,
         TRACKER_STATS,
+        TRACKER_LIST,
         UPLOADED_EVER,
         UPLOAD_LIMIT,
         UPLOAD_LIMITED,
@@ -663,12 +675,13 @@ private:
     double recheck_progress_ = {};
     double seed_ratio_limit_ = {};
 
-    QString primary_mime_type_;
     QString comment_;
     QString creator_;
     QString download_dir_;
     QString error_string_;
     QString name_;
+    QString primary_mime_type_;
+    QString tracker_list_;
 
     // mutable because it's a lazy lookup
     mutable QIcon icon_ = IconCache::get().fileIcon();

@@ -15,6 +15,7 @@
 #include <memory>
 #include <numeric> // std::acumulate()
 #include <string_view>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
@@ -23,12 +24,10 @@
 #include <sys/stat.h> /* umask() */
 #endif
 
-#include <event2/dns.h> /* evdns_base_free() */
 #include <event2/event.h>
 
 #include <libutp/utp.h>
 
-// #define TR_SHOW_DEPRECATED
 #include "transmission.h"
 
 #include "announcer.h"
@@ -112,6 +111,74 @@ tr_peer_id_t tr_peerIdInit()
     *it = Pool[val];
 
     return peer_id;
+}
+
+/***
+****
+***/
+
+std::optional<std::string> tr_session::WebController::cookieFile() const
+{
+    auto const str = tr_strvPath(session_->config_dir, "cookies.txt");
+    return tr_sys_path_exists(str.c_str(), nullptr) ? std::optional<std::string>{ str } : std::nullopt;
+}
+
+std::optional<std::string> tr_session::WebController::userAgent() const
+{
+    return tr_strvJoin(TR_NAME, "/"sv, SHORT_VERSION_STRING);
+}
+
+std::optional<std::string> tr_session::WebController::publicAddress() const
+{
+    for (auto const type : { TR_AF_INET, TR_AF_INET6 })
+    {
+        auto is_default_value = bool{};
+        tr_address const* addr = tr_sessionGetPublicAddress(session_, type, &is_default_value);
+        if (addr != nullptr && !is_default_value)
+        {
+            return tr_address_to_string(addr);
+        }
+    }
+
+    return std::nullopt;
+}
+
+unsigned int tr_session::WebController::clamp(int torrent_id, unsigned int byte_count) const
+{
+    auto const lock = session_->unique_lock();
+    auto const it = session_->torrentsById.find(torrent_id);
+    return it == std::end(session_->torrentsById) ? 0U : it->second->bandwidth->clamp(TR_DOWN, byte_count);
+}
+
+void tr_session::WebController::notifyBandwidthConsumed(int torrent_id, size_t byte_count)
+{
+    auto const lock = session_->unique_lock();
+    auto const it = session_->torrentsById.find(torrent_id);
+    if (it != std::end(session_->torrentsById))
+    {
+        it->second->bandwidth->notifyBandwidthConsumed(TR_DOWN, byte_count, true, tr_time_msec());
+    }
+}
+
+void tr_session::WebController::run(tr_web::FetchDoneFunc&& func, tr_web::FetchResponse&& response) const
+{
+    // marshall the `func` call into the libtransmission thread
+
+    using wrapper_t = std::pair<tr_web::FetchDoneFunc, tr_web::FetchResponse>;
+
+    auto constexpr callback = [](void* vwrapped)
+    {
+        auto* const wrapped = static_cast<wrapper_t*>(vwrapped);
+        wrapped->first(wrapped->second);
+        delete wrapped;
+    };
+
+    tr_runInEventThread(session_, callback, new wrapper_t{ func, std::move(response) });
+}
+
+void tr_sessionFetch(tr_session* session, tr_web::FetchOptions&& options)
+{
+    session->web->fetch(std::move(options));
 }
 
 /***
@@ -260,7 +327,7 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
 {
     TR_ASSERT(tr_variantIsDict(d));
 
-    tr_variantDictReserve(d, 69);
+    tr_variantDictReserve(d, 71);
     tr_variantDictAddBool(d, TR_KEY_blocklist_enabled, false);
     tr_variantDictAddStrView(d, TR_KEY_blocklist_url, "http://www.example.com/blocklist"sv);
     tr_variantDictAddInt(d, TR_KEY_cache_size_mb, DefaultCacheSizeMB);
@@ -311,6 +378,8 @@ void tr_sessionGetDefaultSettings(tr_variant* d)
     tr_variantDictAddBool(d, TR_KEY_script_torrent_added_enabled, false);
     tr_variantDictAddStrView(d, TR_KEY_script_torrent_done_filename, "");
     tr_variantDictAddBool(d, TR_KEY_script_torrent_done_enabled, false);
+    tr_variantDictAddStrView(d, TR_KEY_script_torrent_done_seeding_filename, "");
+    tr_variantDictAddBool(d, TR_KEY_script_torrent_done_seeding_enabled, false);
     tr_variantDictAddInt(d, TR_KEY_seed_queue_size, 10);
     tr_variantDictAddBool(d, TR_KEY_seed_queue_enabled, false);
     tr_variantDictAddBool(d, TR_KEY_alt_speed_enabled, false);
@@ -336,7 +405,7 @@ void tr_sessionGetSettings(tr_session const* s, tr_variant* d)
 {
     TR_ASSERT(tr_variantIsDict(d));
 
-    tr_variantDictReserve(d, 68);
+    tr_variantDictReserve(d, 70);
     tr_variantDictAddBool(d, TR_KEY_blocklist_enabled, s->useBlocklist());
     tr_variantDictAddStr(d, TR_KEY_blocklist_url, s->blocklistUrl());
     tr_variantDictAddInt(d, TR_KEY_cache_size_mb, tr_sessionGetCacheLimit_MB(s));
@@ -382,10 +451,6 @@ void tr_sessionGetSettings(tr_session const* s, tr_variant* d)
     tr_variantDictAddStr(d, TR_KEY_rpc_whitelist, tr_sessionGetRPCWhitelist(s));
     tr_variantDictAddBool(d, TR_KEY_rpc_whitelist_enabled, tr_sessionGetRPCWhitelistEnabled(s));
     tr_variantDictAddBool(d, TR_KEY_scrape_paused_torrents_enabled, s->scrapePausedTorrents);
-    tr_variantDictAddBool(d, TR_KEY_script_torrent_added_enabled, tr_sessionIsScriptEnabled(s, TR_SCRIPT_ON_TORRENT_ADDED));
-    tr_variantDictAddStr(d, TR_KEY_script_torrent_added_filename, tr_sessionGetScript(s, TR_SCRIPT_ON_TORRENT_ADDED));
-    tr_variantDictAddBool(d, TR_KEY_script_torrent_done_enabled, tr_sessionIsScriptEnabled(s, TR_SCRIPT_ON_TORRENT_DONE));
-    tr_variantDictAddStr(d, TR_KEY_script_torrent_done_filename, tr_sessionGetScript(s, TR_SCRIPT_ON_TORRENT_DONE));
     tr_variantDictAddInt(d, TR_KEY_seed_queue_size, tr_sessionGetQueueSize(s, TR_UP));
     tr_variantDictAddBool(d, TR_KEY_seed_queue_enabled, tr_sessionGetQueueEnabled(s, TR_UP));
     tr_variantDictAddBool(d, TR_KEY_alt_speed_enabled, tr_sessionUsesAltSpeed(s));
@@ -405,6 +470,11 @@ void tr_sessionGetSettings(tr_session const* s, tr_variant* d)
     tr_variantDictAddBool(d, TR_KEY_trash_original_torrent_files, tr_sessionGetDeleteSource(s));
     tr_variantDictAddInt(d, TR_KEY_anti_brute_force_threshold, tr_sessionGetAntiBruteForceThreshold(s));
     tr_variantDictAddBool(d, TR_KEY_anti_brute_force_enabled, tr_sessionGetAntiBruteForceEnabled(s));
+    for (auto const& [enabled_key, script_key, script] : tr_session::Scripts)
+    {
+        tr_variantDictAddBool(d, enabled_key, tr_sessionIsScriptEnabled(s, script));
+        tr_variantDictAddStr(d, script_key, tr_sessionGetScript(s, script));
+    }
 }
 
 bool tr_sessionLoadSettings(tr_variant* dict, char const* config_dir, char const* appName)
@@ -689,6 +759,8 @@ static void tr_sessionInitImpl(void* vdata)
     tr_sessionSet(session, &settings);
 
     tr_udpInit(session);
+
+    session->web = tr_web::create(session->web_controller);
 
     if (session->isLPDEnabled)
     {
@@ -1022,28 +1094,17 @@ static void sessionSetImpl(void* vdata)
 
     turtleBootstrap(session, turtle);
 
-    /**
-    ***  Scripts
-    **/
-
-    if (tr_variantDictFindBool(settings, TR_KEY_script_torrent_added_enabled, &boolVal))
+    for (auto const& [enabled_key, script_key, script] : tr_session::Scripts)
     {
-        session->useScript(TR_SCRIPT_ON_TORRENT_ADDED, boolVal);
-    }
+        if (auto enabled = bool{}; tr_variantDictFindBool(settings, enabled_key, &enabled))
+        {
+            session->useScript(script, enabled);
+        }
 
-    if (tr_variantDictFindStrView(settings, TR_KEY_script_torrent_added_filename, &sv))
-    {
-        session->setScript(TR_SCRIPT_ON_TORRENT_ADDED, sv);
-    }
-
-    if (tr_variantDictFindBool(settings, TR_KEY_script_torrent_done_enabled, &boolVal))
-    {
-        session->useScript(TR_SCRIPT_ON_TORRENT_DONE, boolVal);
-    }
-
-    if (tr_variantDictFindStrView(settings, TR_KEY_script_torrent_done_filename, &sv))
-    {
-        session->setScript(TR_SCRIPT_ON_TORRENT_DONE, sv);
+        if (auto file = std::string_view{}; tr_variantDictFindStrView(settings, script_key, &file))
+        {
+            session->setScript(script, file);
+        }
     }
 
     if (tr_variantDictFindBool(settings, TR_KEY_scrape_paused_torrents_enabled, &boolVal))
@@ -1807,7 +1868,7 @@ static void sessionCloseImplStart(tr_session* session)
 
     /* and this goes *after* announcer close so that
        it won't be idle until the announce events are sent... */
-    tr_webClose(session, TR_WEB_CLOSE_WHEN_IDLE);
+    session->web->closeSoon();
 
     tr_cacheFree(session->cache);
     session->cache = nullptr;
@@ -1844,8 +1905,6 @@ static void sessionCloseImplFinish(tr_session* session)
     session->saveTimer = nullptr;
 
     /* we had to wait until UDP trackers were closed before closing these: */
-    evdns_base_free(session->evdns_base, 0);
-    session->evdns_base = nullptr;
     tr_tracker_udp_close(session);
     tr_udpUninit(session);
 
@@ -1900,7 +1959,7 @@ void tr_sessionClose(tr_session* session)
      * so we need to keep the transmission thread alive
      * for a bit while they tell the router & tracker
      * that we're closing now */
-    while ((session->shared != nullptr || session->web != nullptr || session->announcer != nullptr ||
+    while ((session->shared != nullptr || !session->web->isClosed() || session->announcer != nullptr ||
             session->announcer_udp != nullptr) &&
            !deadlineReached(deadline))
     {
@@ -1913,7 +1972,7 @@ void tr_sessionClose(tr_session* session)
         tr_wait_msec(50);
     }
 
-    tr_webClose(session, TR_WEB_CLOSE_NOW);
+    session->web.reset();
 
     /* close the libtransmission thread */
     tr_eventClose(session);
@@ -2783,7 +2842,6 @@ void tr_sessionRemoveTorrent(tr_session* session, tr_torrent* tor)
 
 tr_torrent* tr_session::getTorrent(std::string_view info_dict_hash_string)
 {
-    return std::size(info_dict_hash_string) == TR_SHA1_DIGEST_STRLEN ?
-        this->getTorrent(tr_sha1_from_string(info_dict_hash_string)) :
-        nullptr;
+    auto const info_hash = tr_sha1_from_string(info_dict_hash_string);
+    return info_hash ? this->getTorrent(*info_hash) : nullptr;
 }

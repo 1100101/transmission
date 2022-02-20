@@ -142,8 +142,8 @@ Request arguments:
 | `bandwidthPriority`   | number   | this torrent's bandwidth tr_priority_t
 | `downloadLimit`       | number   | maximum download speed (KBps)
 | `downloadLimited`     | boolean  | true if `downloadLimit` is honored
-| `files-wanted`        | array    | indices of file(s) to download
 | `files-unwanted`      | array    | indices of file(s) to not download
+| `files-wanted`        | array    | indices of file(s) to download
 | `honorsSessionLimits` | boolean  | true if session upload limits are honored
 | `ids`                 | array    | torrent list, as described in 3.1
 | `labels`              | array    | array of string labels
@@ -157,9 +157,10 @@ Request arguments:
 | `seedIdleMode`        | number   | which seeding inactivity to use. See tr_idlelimit
 | `seedRatioLimit`      | double   | torrent-level seeding ratio
 | `seedRatioMode`       | number   | which ratio to use. See tr_ratiolimit
-| `trackerAdd`          | array    | strings of announce URLs to add
-| `trackerRemove`       | array    | ids of trackers to remove
-| `trackerReplace`      | array    | pairs of <trackerId/new announce URLs>
+| `trackerAdd`          | array    | **DEPRECATED** use trackerList instead
+| `trackerList`         | string   | string of announce URLs, one per line, with a blank line between tiers
+| `trackerRemove`       | array    | **DEPRECATED** use trackerList instead
+| `trackerReplace`      | array    | **DEPRECATED** use trackerList instead
 | `uploadLimit`         | number   | maximum upload speed (KBps)
 | `uploadLimited`       | boolean  | true if `uploadLimit` is honored
 
@@ -248,7 +249,8 @@ The 'source' column here corresponds to the data structure there.
 | `peersFrom` | object (see below)| n/a
 | `peersGettingFromUs` | number| tr_stat
 | `peersSendingToUs` | number| tr_stat
-| `percentDone` | double| tr_stat
+| `percentComplete` | double | tr_stat
+| `percentDone` | double | tr_stat
 | `pieces` | string (see below)| tr_torrent
 | `pieceCount`| number| tr_torrent_view
 | `pieceSize`| number| tr_torrent_view
@@ -268,6 +270,7 @@ The 'source' column here corresponds to the data structure there.
 | `startDate`| number| tr_stat
 | `status`| number (see below)| tr_stat
 | `trackers`| array (see below)| n/a
+' `trackerList` | string | string of announce URLs, one per line, with a blank line between tiers
 | `trackerStats`| array (see below)| n/a
 | `totalSize`| number| tr_torrent_view
 | `torrentFile`| string| tr_info
@@ -530,6 +533,7 @@ Response arguments: `path`, `name`, and `id`, holding the torrent ID integer
 | `config-dir` | string | location of transmission's configuration directory
 | `dht-enabled` | boolean | true means allow dht in public torrents
 | `download-dir` | string | default path to download torrents
+| `download-dir-free-space` | number |  **DEPRECATED** Use the `free-space` method instead.
 | `download-queue-enabled` | boolean | if true, limit how many torrents can be downloaded at once
 | `download-queue-size` | number | max number of torrents to download at once (see download-queue-enabled)
 | `encryption` | string | `required`, `preferred`, `tolerated`
@@ -550,10 +554,12 @@ Response arguments: `path`, `name`, and `id`, holding the torrent ID integer
 | `rpc-version-minimum` | number | the minimum RPC API version supported
 | `rpc-version-semver` | number | the current RPC API version in a semver-compatible string
 | `rpc-version` | number | the current RPC API version
-| `script-torrent-added-enabled` | boolean | whether or not to call the `done` script
+| `script-torrent-added-enabled` | boolean | whether or not to call the `added` script
 | `script-torrent-added-filename` | string | filename of the script to run
 | `script-torrent-done-enabled` | boolean | whether or not to call the `done` script
 | `script-torrent-done-filename` | string | filename of the script to run
+| `script-torrent-done-seeding-enabled` | boolean | whether or not to call the `seeding-done` script
+| `script-torrent-done-seeding-filename` | string | filename of the script to run
 | `seed-queue-enabled` | boolean | if true, limit how many torrents can be uploaded at once
 | `seed-queue-size` | number | max number of torrents to uploaded at once (see seed-queue-enabled)
 | `seedRatioLimit` | double | the default seed ratio for torrents to use
@@ -932,25 +938,22 @@ Transmission 4.0.0 (`rpc-version-semver` 5.3.0, `rpc-version`: 17)
 | Method | Description
 |:---|:---
 | `/upload` | :warning: undocumented `/upload` endpoint removed
+| `session-get` | **DEPRECATED** `download-dir-free-space`. Use `free-space` instead.
 | `free-space` | new return arg `total-capacity`
 | `session-get` | new arg `rpc-version-semver`
 | `session-get` | new arg `script-torrent-added-enabled`
 | `session-get` | new arg `script-torrent-added-filename`
+| `session-get` | new arg `script-torrent-done-seeding-enabled`
+| `session-get` | new arg `script-torrent-done-seeding-filename`
 | `torrent-add` | new arg `labels`
 | `torrent-get` | new arg `file-count`
+| `torrent-get` | new arg `percentComplete`
+| `torrent-get` | new arg `primary-mime-type`
 | `torrent-get` | new arg `tracker.sitename`
 | `torrent-get` | new arg `trackerStats.sitename`
-| `torrent-get` | new arg `primary-mime-type`
+| `torrent-get` | new arg `trackerList`
+| `torrent-set` | new arg `trackerList`
+| `torrent-set` | **DEPRECATED** `trackerAdd`. Use `trackerList` instead.
+| `torrent-set` | **DEPRECATED** `trackerRemove`. Use `trackerList` instead.
+| `torrent-set` | **DEPRECATED** `trackerReplace`. Use `trackerList` instead.
 
-
-### 5.1. Upcoming Breakage
-
-These features are deprecated:
-
-1. session-get's 'download-dir-free-space' argument will be removed.
-   Its functionality has been superceded by the 'free-space' method.
-
-2. HTTP POSTs to http://server:port/transmission/upload will fail.
-   This was an undocumented hack to allow web clients to add files without
-   client-side access to the file. This functionality is superceded by
-   using HTML5's FileReader object + the documented 'torrent-add' method.

@@ -7,7 +7,6 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include <event2/buffer.h>
 #include <event2/event.h>
@@ -24,36 +23,131 @@
 #include "web.h"
 #include "webseed.h"
 
+using namespace std::literals;
+
 namespace
 {
 
 struct tr_webseed;
 
-struct tr_webseed_task
+void on_idle(tr_webseed* w);
+
+class tr_webseed_task
 {
-    bool dead;
-    struct evbuffer* content;
-    struct tr_webseed* webseed;
-    tr_session* session;
-    tr_block_index_t block;
-    tr_piece_index_t piece_index;
-    uint32_t piece_offset;
-    uint32_t length;
-    tr_block_index_t blocks_done;
-    uint32_t block_size;
-    struct tr_web_task* web_task;
-    long response_code;
+private:
+    std::shared_ptr<evbuffer> const content_{ evbuffer_new(), evbuffer_free };
+
+public:
+    tr_webseed_task(tr_torrent* tor, tr_webseed* webseed_in, tr_block_span_t span)
+        : webseed{ webseed_in }
+        , session{ tor->session }
+        , block{ span.begin }
+        , piece_index{ tor->pieceForBlock(this->block) }
+        , piece_offset{ static_cast<uint32_t>(
+              int64_t{ tor->blockSize() } * this->block - tor->pieceSize() * this->piece_index) }
+        , block_size{ tor->blockSize() }
+        , length{ (span.end - 1 - span.begin) * tor->blockSize() + tor->blockSize(span.end - 1) }
+    {
+    }
+
+    tr_webseed* const webseed;
+
+    [[nodiscard]] auto* content() const
+    {
+        return content_.get();
+    }
+
+    tr_session* const session;
+    tr_block_index_t const block;
+    tr_piece_index_t const piece_index;
+    uint32_t const piece_offset;
+    uint32_t const block_size;
+    uint32_t const length;
+
+    bool dead = false;
+    tr_block_index_t blocks_done = 0;
 };
 
-auto constexpr TR_IDLE_TIMER_MSEC = 2000;
+/**
+ * Manages how many web tasks should be running at a time.
+ *
+ * - When all is well, allow multiple tasks running in parallel.
+ * - If we get an error, throttle down to only one at a time
+ *   until we get piece data.
+ * - If we have too many errors in a row, put the peer in timeout
+ *   and don't allow _any_ connections for awhile.
+ */
+class ConnectionLimiter
+{
+public:
+    void taskStarted()
+    {
+        ++n_tasks;
+    }
 
-auto constexpr FAILURE_RETRY_INTERVAL = 150;
+    void taskFinished(bool success)
+    {
+        if (!success)
+        {
+            taskFailed();
+        }
 
-auto constexpr MAX_CONSECUTIVE_FAILURES = 5;
+        TR_ASSERT(n_tasks > 0);
+        --n_tasks;
+    }
 
-auto constexpr MAX_WEBSEED_CONNECTIONS = 4;
+    void gotData()
+    {
+        TR_ASSERT(n_tasks > 0);
+        n_consecutive_failures = 0;
+        paused_until = 0;
+    }
 
-void webseed_timer_func(evutil_socket_t fd, short what, void* vw);
+    [[nodiscard]] size_t slotsAvailable() const
+    {
+        if (isPaused())
+        {
+            return 0;
+        }
+
+        auto const max = maxConnections();
+        if (n_tasks >= max)
+        {
+            return 0;
+        }
+
+        return max - n_tasks;
+    }
+
+private:
+    [[nodiscard]] bool isPaused() const
+    {
+        return paused_until > tr_time();
+    }
+
+    [[nodiscard]] size_t maxConnections() const
+    {
+        return n_consecutive_failures > 0 ? 1 : MaxConnections;
+    }
+
+    void taskFailed()
+    {
+        TR_ASSERT(n_tasks > 0);
+
+        if (++n_consecutive_failures >= MaxConsecutiveFailures)
+        {
+            paused_until = tr_time() + TimeoutIntervalSecs;
+        }
+    }
+
+    static time_t constexpr TimeoutIntervalSecs = 120;
+    static size_t constexpr MaxConnections = 4;
+    static size_t constexpr MaxConsecutiveFailures = MaxConnections;
+
+    size_t n_tasks = 0;
+    size_t n_consecutive_failures = 0;
+    time_t paused_until = 0;
+};
 
 struct tr_webseed : public tr_peer
 {
@@ -65,15 +159,13 @@ public:
         , callback{ callback_in }
         , callback_data{ callback_data_in }
         , bandwidth(tor->bandwidth)
-        , timer(evtimer_new(session->event_base, webseed_timer_func, this))
+        , pulse_timer(evtimer_new(session->event_base, &tr_webseed::onTimer, this), event_free)
     {
         // init parent bits
         have.setHasAll();
         tr_peerUpdateProgress(tor, this);
 
-        file_urls.resize(tor->fileCount());
-
-        tr_timerAddMsec(timer, TR_IDLE_TIMER_MSEC);
+        startTimer();
     }
 
     ~tr_webseed() override
@@ -81,8 +173,6 @@ public:
         // flag all the pending tasks as dead
         std::for_each(std::begin(tasks), std::end(tasks), [](auto* task) { task->dead = true; });
         tasks.clear();
-
-        event_free(timer);
     }
 
     bool is_transferring_pieces(uint64_t now, tr_direction direction, unsigned int* setme_Bps) const override
@@ -110,36 +200,31 @@ public:
     void* const callback_data;
 
     Bandwidth bandwidth;
+    ConnectionLimiter connection_limiter;
     std::set<tr_webseed_task*> tasks;
-    struct event* const timer;
-    int consecutive_failures = 0;
-    int retry_tickcount = 0;
-    int retry_challenge = 0;
-    int idle_connections = 0;
-    int active_transfers = 0;
-    std::vector<std::string> file_urls;
-};
 
-} // namespace
-
-tr_webseed_view tr_webseedView(tr_peer const* peer)
-{
-    auto const* w = dynamic_cast<tr_webseed const*>(peer);
-    if (w == nullptr)
+private:
+    void startTimer()
     {
-        return {};
+        tr_timerAddMsec(pulse_timer.get(), IdleTimerMsec);
     }
 
-    auto bytes_per_second = unsigned{ 0 };
-    auto const is_downloading = peer->is_transferring_pieces(tr_time_msec(), TR_DOWN, &bytes_per_second);
-    return { w->base_url.c_str(), is_downloading, bytes_per_second };
-}
+    static void onTimer(evutil_socket_t /*fd*/, short /*what*/, void* vwebseed)
+    {
+        auto* const webseed = static_cast<tr_webseed*>(vwebseed);
+        on_idle(webseed);
+        webseed->startTimer();
+    }
+
+    std::shared_ptr<event> const pulse_timer;
+    static int constexpr IdleTimerMsec = 2000;
+};
 
 /***
 ****
 ***/
 
-static void publish(tr_webseed* w, tr_peer_event* e)
+void publish(tr_webseed* w, tr_peer_event* e)
 {
     if (w->callback != nullptr)
     {
@@ -147,7 +232,7 @@ static void publish(tr_webseed* w, tr_peer_event* e)
     }
 }
 
-static void fire_client_got_rejs(tr_torrent* tor, tr_webseed* w, tr_block_index_t block, tr_block_index_t count)
+void fire_client_got_rejs(tr_torrent* tor, tr_webseed* w, tr_block_index_t block, tr_block_index_t count)
 {
     auto e = tr_peer_event{};
     e.eventType = TR_PEER_CLIENT_GOT_REJ;
@@ -165,7 +250,7 @@ static void fire_client_got_rejs(tr_torrent* tor, tr_webseed* w, tr_block_index_
     }
 }
 
-static void fire_client_got_blocks(tr_torrent* tor, tr_webseed* w, tr_block_index_t block, tr_block_index_t count)
+void fire_client_got_blocks(tr_torrent* tor, tr_webseed* w, tr_block_index_t block, tr_block_index_t count)
 {
     auto e = tr_peer_event{};
     e.eventType = TR_PEER_CLIENT_GOT_BLOCK;
@@ -183,7 +268,7 @@ static void fire_client_got_blocks(tr_torrent* tor, tr_webseed* w, tr_block_inde
     }
 }
 
-static void fire_client_got_piece_data(tr_webseed* w, uint32_t length)
+void fire_client_got_piece_data(tr_webseed* w, uint32_t length)
 {
     auto e = tr_peer_event{};
     e.eventType = TR_PEER_CLIENT_GOT_PIECE_DATA;
@@ -197,21 +282,37 @@ static void fire_client_got_piece_data(tr_webseed* w, uint32_t length)
 
 struct write_block_data
 {
-    tr_session* session;
-    int torrent_id;
-    struct tr_webseed* webseed;
-    struct evbuffer* content;
+private:
+    std::shared_ptr<evbuffer> const content_{ evbuffer_new(), evbuffer_free };
+
+public:
+    write_block_data(tr_session* session_in, int torrent_id_in, tr_webseed* webseed_in)
+        : session{ session_in }
+        , torrent_id{ torrent_id_in }
+        , webseed{ webseed_in }
+    {
+    }
+
+    [[nodiscard]] auto* content() const
+    {
+        return content_.get();
+    }
+
+    tr_session* const session;
+    int const torrent_id;
+    tr_webseed* const webseed;
+
     tr_piece_index_t piece_index;
     tr_block_index_t block_index;
     tr_block_index_t count;
     uint32_t block_offset;
 };
 
-static void write_block_func(void* vdata)
+void write_block_func(void* vdata)
 {
-    auto* const data = static_cast<struct write_block_data*>(vdata);
+    auto* const data = static_cast<write_block_data*>(vdata);
     struct tr_webseed* const w = data->webseed;
-    struct evbuffer* const buf = data->content;
+    auto* const buf = data->content();
 
     auto* const tor = tr_torrentFindFromId(data->session, data->torrent_id);
     if (tor != nullptr)
@@ -235,44 +336,6 @@ static void write_block_func(void* vdata)
         }
     }
 
-    evbuffer_free(buf);
-    tr_free(data);
-}
-
-/***
-****
-***/
-
-struct connection_succeeded_data
-{
-    tr_webseed* webseed = nullptr;
-    std::string real_url;
-    tr_piece_index_t piece_index = 0;
-    uint32_t piece_offset = 0;
-};
-
-static void connection_succeeded(void* vdata)
-{
-    auto* data = static_cast<struct connection_succeeded_data*>(vdata);
-    struct tr_webseed* w = data->webseed;
-
-    if (++w->active_transfers >= w->retry_challenge && w->retry_challenge != 0)
-    {
-        /* the server seems to be accepting more connections now */
-        w->consecutive_failures = w->retry_tickcount = w->retry_challenge = 0;
-    }
-
-    if (!std::empty(data->real_url))
-    {
-        tr_torrent const* const tor = tr_torrentFindFromId(w->session, w->torrent_id);
-
-        if (tor != nullptr)
-        {
-            auto const file_index = tor->fileOffset(data->piece_index, data->piece_offset).index;
-            w->file_urls[file_index].assign(data->real_url);
-        }
-    }
-
     delete data;
 }
 
@@ -280,61 +343,39 @@ static void connection_succeeded(void* vdata)
 ****
 ***/
 
-static void on_content_changed(struct evbuffer* buf, struct evbuffer_cb_info const* info, void* vtask)
+void on_content_changed(evbuffer* buf, evbuffer_cb_info const* info, void* vtask)
 {
     size_t const n_added = info->n_added;
-    auto* task = static_cast<struct tr_webseed_task*>(vtask);
-    auto* session = task->session;
+    auto* const task = static_cast<tr_webseed_task*>(vtask);
+    auto* const session = task->session;
     auto const lock = session->unique_lock();
 
     if (!task->dead && n_added > 0)
     {
-        struct tr_webseed* w = task->webseed;
+        auto* const w = task->webseed;
 
         w->bandwidth.notifyBandwidthConsumed(TR_DOWN, n_added, true, tr_time_msec());
         fire_client_got_piece_data(w, n_added);
         uint32_t const len = evbuffer_get_length(buf);
 
-        if (task->response_code == 0)
-        {
-            task->response_code = tr_webGetTaskResponseCode(task->web_task);
+        task->webseed->connection_limiter.gotData();
 
-            if (task->response_code == 206)
-            {
-                auto const* real_url = tr_webGetTaskRealUrl(task->web_task);
-
-                /* processing this uses a tr_torrent pointer,
-                   so push the work to the libevent thread... */
-                tr_runInEventThread(
-                    session,
-                    connection_succeeded,
-                    new connection_succeeded_data{ w,
-                                                   real_url != nullptr ? real_url : "",
-                                                   task->piece_index,
-                                                   task->piece_offset + task->blocks_done * task->block_size + len - 1 });
-            }
-        }
-
-        if (task->response_code == 206 && len >= task->block_size)
+        if (len >= task->block_size)
         {
             /* once we've got at least one full block, save it */
 
             uint32_t const block_size = task->block_size;
             tr_block_index_t const completed = len / block_size;
 
-            auto* const data = tr_new(struct write_block_data, 1);
-            data->webseed = task->webseed;
+            auto* const data = new write_block_data{ session, w->torrent_id, task->webseed };
             data->piece_index = task->piece_index;
             data->block_index = task->block + task->blocks_done;
             data->count = completed;
             data->block_offset = task->piece_offset + task->blocks_done * block_size;
-            data->content = evbuffer_new();
-            data->torrent_id = w->torrent_id;
-            data->session = w->session;
 
             /* we don't use locking on this evbuffer so we must copy out the data
                that will be needed when writing the block in a different thread */
-            evbuffer_remove_buffer(task->content, data->content, (size_t)block_size * (size_t)completed);
+            evbuffer_remove_buffer(task->content(), data->content(), (size_t)block_size * (size_t)completed);
 
             tr_runInEventThread(w->session, write_block_func, data);
             task->blocks_done += completed;
@@ -342,95 +383,49 @@ static void on_content_changed(struct evbuffer* buf, struct evbuffer_cb_info con
     }
 }
 
-static void task_request_next_chunk(struct tr_webseed_task* task);
+void task_request_next_chunk(tr_webseed_task* task);
 
-static void on_idle(tr_webseed* w)
+void on_idle(tr_webseed* w)
 {
-    auto want = int{};
-    int const running_tasks = std::size(w->tasks);
-    tr_torrent* tor = tr_torrentFindFromId(w->session, w->torrent_id);
-
-    if (w->consecutive_failures >= MAX_CONSECUTIVE_FAILURES)
+    auto* const tor = tr_torrentFindFromId(w->session, w->torrent_id);
+    if (tor == nullptr || !tor->isRunning || tor->isDone())
     {
-        want = w->idle_connections;
-
-        if (w->retry_tickcount >= FAILURE_RETRY_INTERVAL)
-        {
-            /* some time has passed since our connection attempts failed. try again */
-            ++want;
-            /* if this challenge is fulfilled we will reset consecutive_failures */
-            w->retry_challenge = running_tasks + want;
-        }
-    }
-    else
-    {
-        want = MAX_WEBSEED_CONNECTIONS - running_tasks;
-        w->retry_challenge = running_tasks + w->idle_connections + 1;
-    }
-
-    if (tor != nullptr && tor->isRunning && !tor->isDone() && want > 0)
-    {
-        auto n_tasks = size_t{};
-
-        for (auto const span : tr_peerMgrGetNextRequests(tor, w, want))
-        {
-            auto const [begin, end] = span;
-            auto* const task = tr_new0(tr_webseed_task, 1);
-            task->session = tor->session;
-            task->webseed = w;
-            task->block = begin;
-            task->piece_index = tor->pieceForBlock(begin);
-            task->piece_offset = tor->blockSize() * begin - tor->pieceSize() * task->piece_index;
-            task->length = (end - 1 - begin) * tor->blockSize() + tor->blockSize(end - 1);
-            task->blocks_done = 0;
-            task->response_code = 0;
-            task->block_size = tor->blockSize();
-            task->content = evbuffer_new();
-            evbuffer_add_cb(task->content, on_content_changed, task);
-            w->tasks.insert(task);
-            task_request_next_chunk(task);
-
-            --w->idle_connections;
-            ++n_tasks;
-            tr_peerMgrClientSentRequests(tor, w, span);
-        }
-
-        if (w->retry_tickcount >= FAILURE_RETRY_INTERVAL && n_tasks > 0)
-        {
-            w->retry_tickcount = 0;
-        }
-    }
-}
-
-static void web_response_func(
-    tr_session* session,
-    bool /*did_connect*/,
-    bool /*did_timeout*/,
-    long response_code,
-    std::string_view /*response*/,
-    void* vtask)
-{
-    auto* t = static_cast<struct tr_webseed_task*>(vtask);
-    bool const success = response_code == 206;
-
-    if (t->dead)
-    {
-        evbuffer_free(t->content);
-        tr_free(t);
         return;
     }
 
-    tr_webseed* w = t->webseed;
+    for (auto const span : tr_peerMgrGetNextRequests(tor, w, w->connection_limiter.slotsAvailable()))
+    {
+        w->connection_limiter.taskStarted();
+        auto* const task = new tr_webseed_task{ tor, w, span };
+        evbuffer_add_cb(task->content(), on_content_changed, task);
+        w->tasks.insert(task);
+        task_request_next_chunk(task);
+
+        tr_peerMgrClientSentRequests(tor, w, span);
+    }
+}
+
+void onPartialDataFetched(tr_web::FetchResponse const& web_response)
+{
+    auto const& [status, body, did_connect, did_timeout, vtask] = web_response;
+    bool const success = status == 206;
+
+    auto* const t = static_cast<tr_webseed_task*>(vtask);
+    auto* const session = t->session;
+    auto* const w = t->webseed;
+
+    w->connection_limiter.taskFinished(success);
+
+    if (t->dead)
+    {
+        delete t;
+        return;
+    }
+
     tr_torrent* tor = tr_torrentFindFromId(session, w->torrent_id);
 
     if (tor != nullptr)
     {
-        /* active_transfers was only increased if the connection was successful */
-        if (t->response_code == 206)
-        {
-            --w->active_transfers;
-        }
-
         if (!success)
         {
             tr_block_index_t const blocks_remain = (t->length + tor->blockSize() - 1) / tor->blockSize() - t->blocks_done;
@@ -440,30 +435,18 @@ static void web_response_func(
                 fire_client_got_rejs(tor, w, t->block + t->blocks_done, blocks_remain);
             }
 
-            if (t->blocks_done != 0)
-            {
-                ++w->idle_connections;
-            }
-            else if (++w->consecutive_failures >= MAX_CONSECUTIVE_FAILURES && w->retry_tickcount == 0)
-            {
-                /* now wait a while until retrying to establish a connection */
-                ++w->retry_tickcount;
-            }
-
             w->tasks.erase(t);
-            evbuffer_free(t->content);
-            tr_free(t);
+            delete t;
         }
         else
         {
             uint32_t const bytes_done = t->blocks_done * tor->blockSize();
-            uint32_t const buf_len = evbuffer_get_length(t->content);
+            uint32_t const buf_len = evbuffer_get_length(t->content());
 
             if (bytes_done + buf_len < t->length)
             {
                 /* request finished successfully but there's still data missing. that
                    means we've reached the end of a file and need to request the next one */
-                t->response_code = 0;
                 task_request_next_chunk(t);
             }
             else
@@ -472,16 +455,19 @@ static void web_response_func(
                 {
                     /* on_content_changed() will not write a block if it is smaller than
                        the torrent's block size, i.e. the torrent's very last block */
-                    tr_cacheWriteBlock(session->cache, tor, t->piece_index, t->piece_offset + bytes_done, buf_len, t->content);
+                    tr_cacheWriteBlock(
+                        session->cache,
+                        tor,
+                        t->piece_index,
+                        t->piece_offset + bytes_done,
+                        buf_len,
+                        t->content());
 
                     fire_client_got_blocks(tor, t->webseed, t->block + t->blocks_done, 1);
                 }
 
-                ++w->idle_connections;
-
                 w->tasks.erase(t);
-                evbuffer_free(t->content);
-                tr_free(t);
+                delete t;
 
                 on_idle(w);
             }
@@ -489,78 +475,66 @@ static void web_response_func(
     }
 }
 
-static std::string make_url(tr_webseed* w, std::string_view name)
+std::string make_url(tr_webseed* w, std::string_view name)
 {
-    struct evbuffer* buf = evbuffer_new();
+    auto url = w->base_url;
 
-    evbuffer_add(buf, std::data(w->base_url), std::size(w->base_url));
-
-    /* if url ends with a '/', add the torrent name */
-    if (*std::rbegin(w->base_url) == '/' && !std::empty(name))
+    if (tr_strvEndsWith(url, "/"sv) && !std::empty(name))
     {
-        tr_http_escape(buf, name, false);
+        tr_http_escape(url, name, false);
     }
 
-    auto url = std::string{ (char const*)evbuffer_pullup(buf, -1), evbuffer_get_length(buf) };
-    evbuffer_free(buf);
     return url;
 }
 
-static void task_request_next_chunk(struct tr_webseed_task* t)
+void task_request_next_chunk(tr_webseed_task* t)
 {
     tr_webseed* w = t->webseed;
-    tr_torrent* tor = tr_torrentFindFromId(w->session, w->torrent_id);
 
-    if (tor != nullptr)
+    tr_torrent* const tor = tr_torrentFindFromId(w->session, w->torrent_id);
+    if (tor == nullptr)
     {
-        auto& urls = t->webseed->file_urls;
-
-        auto const piece_size = tor->pieceSize();
-        uint64_t const remain = t->length - t->blocks_done * tor->blockSize() - evbuffer_get_length(t->content);
-
-        auto const total_offset = tor->offset(t->piece_index, t->piece_offset, t->length - remain);
-        tr_piece_index_t const step_piece = total_offset / piece_size;
-        uint64_t const step_piece_offset = total_offset - uint64_t(piece_size) * step_piece;
-
-        auto const [file_index, file_offset] = tor->fileOffset(step_piece, step_piece_offset);
-        uint64_t this_pass = std::min(remain, tor->fileSize(file_index) - file_offset);
-
-        if (std::empty(urls[file_index]))
-        {
-            urls[file_index] = make_url(t->webseed, tor->fileSubpath(file_index));
-        }
-
-        char range[64];
-        tr_snprintf(range, sizeof(range), "%" PRIu64 "-%" PRIu64, file_offset, file_offset + this_pass - 1);
-
-        t->web_task = tr_webRunWebseed(tor, urls[file_index].c_str(), range, web_response_func, t, t->content);
+        return;
     }
+
+    auto const piece_size = tor->pieceSize();
+    uint64_t const remain = t->length - t->blocks_done * tor->blockSize() - evbuffer_get_length(t->content());
+
+    auto const total_offset = tor->offset(t->piece_index, t->piece_offset, t->length - remain);
+    tr_piece_index_t const step_piece = total_offset / piece_size;
+    uint64_t const step_piece_offset = total_offset - uint64_t(piece_size) * step_piece;
+
+    auto const [file_index, file_offset] = tor->fileOffset(step_piece, step_piece_offset);
+    uint64_t this_pass = std::min(remain, tor->fileSize(file_index) - file_offset);
+
+    auto const url = make_url(t->webseed, tor->fileSubpath(file_index));
+    auto options = tr_web::FetchOptions{ url, onPartialDataFetched, t };
+    options.range = tr_strvJoin(std::to_string(file_offset), "-"sv, std::to_string(file_offset + this_pass - 1));
+    options.speed_limit_tag = tor->uniqueId;
+    options.buffer = t->content();
+    tor->session->web->fetch(std::move(options));
 }
+
+} // namespace
 
 /***
 ****
 ***/
 
-namespace
-{
-
-void webseed_timer_func(evutil_socket_t /*fd*/, short /*what*/, void* vw)
-{
-    auto* w = static_cast<tr_webseed*>(vw);
-
-    if (w->retry_tickcount != 0)
-    {
-        ++w->retry_tickcount;
-    }
-
-    on_idle(w);
-
-    tr_timerAddMsec(w->timer, TR_IDLE_TIMER_MSEC);
-}
-
-} // unnamed namespace
-
-tr_peer* tr_webseedNew(struct tr_torrent* torrent, std::string_view url, tr_peer_callback callback, void* callback_data)
+tr_peer* tr_webseedNew(tr_torrent* torrent, std::string_view url, tr_peer_callback callback, void* callback_data)
 {
     return new tr_webseed(torrent, url, callback, callback_data);
+}
+
+tr_webseed_view tr_webseedView(tr_peer const* peer)
+{
+    auto const* w = dynamic_cast<tr_webseed const*>(peer);
+    if (w == nullptr)
+    {
+        return {};
+    }
+
+    auto bytes_per_second = unsigned{ 0 };
+    auto const is_downloading = peer->is_transferring_pieces(tr_time_msec(), TR_DOWN, &bytes_per_second);
+    return { w->base_url.c_str(), is_downloading, bytes_per_second };
 }

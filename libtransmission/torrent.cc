@@ -448,6 +448,18 @@ static bool tr_torrentIsSeedIdleLimitDone(tr_torrent const* tor)
         difftime(tr_time(), std::max(tor->startDate, tor->activityDate)) >= idleMinutes * 60U;
 }
 
+static void torrentCallScript(tr_torrent const* tor, char const* script);
+
+static void callScriptIfEnabled(tr_torrent const* tor, TrScript type)
+{
+    auto const* session = tor->session;
+
+    if (tr_sessionIsScriptEnabled(session, type))
+    {
+        torrentCallScript(tor, tr_sessionGetScript(session, type));
+    }
+}
+
 /***
 ****
 ***/
@@ -474,7 +486,7 @@ void tr_torrentCheckSeedLimit(tr_torrent* tor)
             (*tor->ratio_limit_hit_func)(tor, tor->ratio_limit_hit_func_user_data);
         }
     }
-    /* if we're seeding and reach our inactiviy limit, stop the torrent */
+    /* if we're seeding and reach our inactivity limit, stop the torrent */
     else if (tr_torrentIsSeedIdleLimitDone(tor))
     {
         tr_logAddTorInfo(tor, "%s", "Seeding idle limit reached; pausing torrent");
@@ -487,6 +499,11 @@ void tr_torrentCheckSeedLimit(tr_torrent* tor)
         {
             (*tor->idle_limit_hit_func)(tor, tor->idle_limit_hit_func_user_data);
         }
+    }
+
+    if (tor->isStopping)
+    {
+        callScriptIfEnabled(tor, TR_SCRIPT_ON_TORRENT_DONE_SEEDING);
     }
 }
 
@@ -611,16 +628,47 @@ static bool setLocalErrorIfFilesDisappeared(tr_torrent* tor)
     return disappeared;
 }
 
-static void torrentCallScript(tr_torrent const* tor, char const* script);
-
-static void callScriptIfEnabled(tr_torrent const* tor, TrScript type)
+/**
+ * Sniff out newly-added seeds so that they can skip the verify step
+ */
+static bool isNewTorrentASeed(tr_torrent* tor)
 {
-    auto const* session = tor->session;
-
-    if (tr_sessionIsScriptEnabled(session, type))
+    if (!tor->hasMetadata())
     {
-        torrentCallScript(tor, tr_sessionGetScript(session, type));
+        return false;
     }
+
+    auto filename_buf = std::string{};
+    for (tr_file_index_t i = 0, n = tor->fileCount(); i < n; ++i)
+    {
+        // it's not a new seed if a file is missing
+        auto const found = tor->findFile(filename_buf, i);
+        if (!found)
+        {
+            return false;
+        }
+
+        // it's not a new seed if a file is partial
+        if (tr_strvEndsWith(found->filename, ".part"sv))
+        {
+            return false;
+        }
+
+        // it's not a new seed if a file size is wrong
+        if (found->size != tor->fileSize(i))
+        {
+            return false;
+        }
+
+        // it's not a new seed if it was modified after it was added
+        if (found->last_modified_at >= tor->addedDate)
+        {
+            return false;
+        }
+    }
+
+    // check the first piece
+    return tor->ensurePieceIsChecked(0);
 }
 
 static void refreshCurrentDir(tr_torrent* tor);
@@ -759,6 +807,12 @@ static void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
         {
             tor->prefetchMagnetMetadata = true;
             tr_torrentStartNow(tor);
+        }
+        else if (isNewTorrentASeed(tor))
+        {
+            tor->completion.setHasAll();
+            tor->doneDate = tor->addedDate;
+            tor->recheckCompleteness();
         }
         else
         {
@@ -1707,18 +1761,17 @@ static void torrentCallScript(tr_torrent const* tor, char const* script)
     auto torrent_dir = std::string{ tor->currentDir().sv() };
     tr_sys_path_native_separators(std::data(torrent_dir));
 
-    auto const cmd = std::array<char const*, 2>{
-        script,
-        nullptr,
-    };
+    auto const cmd = std::array<char const*, 2>{ script, nullptr };
 
     auto const id_str = std::to_string(tr_torrentId(tor));
     auto const labels_str = buildLabelsString(tor);
     auto const trackers_str = buildTrackersString(tor);
+    auto const bytes_downloaded_str = std::to_string(tor->downloadedCur + tor->downloadedPrev);
 
     auto const env = std::map<std::string_view, std::string_view>{
         { "TR_APP_VERSION"sv, SHORT_VERSION_STRING },
         { "TR_TIME_LOCALTIME"sv, ctime_str },
+        { "TR_TORRENT_BYTES_DOWNLOADED"sv, bytes_downloaded_str },
         { "TR_TORRENT_DIR"sv, torrent_dir.c_str() },
         { "TR_TORRENT_HASH"sv, tor->infoHashString() },
         { "TR_TORRENT_ID"sv, id_str },
@@ -1988,40 +2041,49 @@ bool tr_torrent::checkPiece(tr_piece_index_t piece)
 ****
 ***/
 
-bool tr_torrentSetAnnounceList(tr_torrent* tor, char const* const* announce_urls, tr_tracker_tier_t const* tiers, size_t n)
+bool tr_torrent::setTrackerList(std::string_view text)
 {
-    TR_ASSERT(tr_isTorrent(tor));
-    auto const lock = tor->unique_lock();
+    auto const lock = this->unique_lock();
 
     auto announce_list = tr_announce_list();
-    if ((announce_list.set(announce_urls, tiers, n) == 0U) || !announce_list.save(tor->torrentFile()))
+    if (!announce_list.parse(text) || !announce_list.save(this->torrentFile()))
     {
         return false;
     }
 
-    tor->metainfo_.announceList() = announce_list;
-    tor->markEdited();
+    this->metainfo_.announceList() = announce_list;
+    this->markEdited();
 
     /* if we had a tracker-related error on this torrent,
      * and that tracker's been removed,
      * then clear the error */
-    if (tor->error == TR_STAT_TRACKER_WARNING || tor->error == TR_STAT_TRACKER_ERROR)
+    if (this->error == TR_STAT_TRACKER_WARNING || this->error == TR_STAT_TRACKER_ERROR)
     {
-        auto const error_url = tor->error_announce_url;
+        auto const error_url = this->error_announce_url;
 
         if (std::any_of(
-                std::begin(tor->announceList()),
-                std::end(tor->announceList()),
+                std::begin(this->announceList()),
+                std::end(this->announceList()),
                 [error_url](auto const& tracker) { return tracker.announce_str == error_url; }))
         {
-            tr_torrentClearError(tor);
+            tr_torrentClearError(this);
         }
     }
 
     /* tell the announcer to reload this torrent's tracker list */
-    tr_announcerResetTorrent(tor->session->announcer, tor);
+    tr_announcerResetTorrent(this->session->announcer, this);
 
     return true;
+}
+
+bool tr_torrentSetTrackerList(tr_torrent* tor, char const* text)
+{
+    return text != nullptr && tor->setTrackerList(text);
+}
+
+char* tr_torrentGetTrackerList(tr_torrent const* tor)
+{
+    return tr_strvDup(tor->trackerList());
 }
 
 /**

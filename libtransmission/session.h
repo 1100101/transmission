@@ -21,12 +21,15 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
 #include "transmission.h"
 
 #include "net.h" // tr_socket_t
+#include "quark.h"
+#include "web.h"
 
 enum tr_auto_switch_state_t
 {
@@ -42,6 +45,7 @@ struct evdns_base;
 
 class tr_bitfield;
 class tr_rpc_server;
+class tr_web;
 struct Bandwidth;
 struct tr_address;
 struct tr_announcer;
@@ -231,12 +235,20 @@ public:
         peer_congestion_algorithm_ = algorithm;
     }
 
-    void setSocketTOS(tr_socket_t sock, tr_address_type type)
+    void setSocketTOS(tr_socket_t sock, tr_address_type type) const
     {
         tr_netSetTOS(sock, peer_socket_tos_, type);
     }
 
 public:
+    static constexpr std::array<std::tuple<tr_quark, tr_quark, TrScript>, 3> Scripts{
+        { { TR_KEY_script_torrent_added_enabled, TR_KEY_script_torrent_added_filename, TR_SCRIPT_ON_TORRENT_ADDED },
+          { TR_KEY_script_torrent_done_enabled, TR_KEY_script_torrent_done_filename, TR_SCRIPT_ON_TORRENT_DONE },
+          { TR_KEY_script_torrent_done_seeding_enabled,
+            TR_KEY_script_torrent_done_seeding_filename,
+            TR_SCRIPT_ON_TORRENT_DONE_SEEDING } }
+    };
+
     bool isPortRandom;
     bool isPexEnabled;
     bool isDHTEnabled;
@@ -324,7 +336,29 @@ public:
 
     struct tr_cache* cache;
 
-    struct tr_web* web;
+    class WebController final : public tr_web::Controller
+    {
+    public:
+        explicit WebController(tr_session* session)
+            : session_{ session }
+        {
+        }
+        ~WebController() override = default;
+
+        [[nodiscard]] std::optional<std::string> cookieFile() const override;
+        [[nodiscard]] std::optional<std::string> publicAddress() const override;
+        [[nodiscard]] std::optional<std::string> userAgent() const override;
+        [[nodiscard]] unsigned int clamp(int bandwidth_tag, unsigned int byte_count) const override;
+        void notifyBandwidthConsumed(int torrent_id, size_t byte_count) override;
+        // runs the tr_web::fetch response callback in the libtransmission thread
+        void run(tr_web::FetchDoneFunc&& func, tr_web::FetchResponse&& response) const override;
+
+    private:
+        tr_session* const session_;
+    };
+
+    WebController web_controller{ this };
+    std::unique_ptr<tr_web> web;
 
     struct tr_session_id* session_id;
 
