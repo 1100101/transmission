@@ -19,6 +19,7 @@ macosx/Info.plist
 macosx/Transmission.app
 macosx/en.lproj/*~.nib
 node_modules/
+web/node_modules
 po/*.mo
 third-party/miniupnp/miniupnpcstrings.h
 web/public_html/transmission-app.js.map
