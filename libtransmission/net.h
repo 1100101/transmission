@@ -85,19 +85,24 @@ struct tr_address
         struct in_addr addr4;
     } addr;
 
-    bool operator==(tr_address const& that) const
+    [[nodiscard]] int compare(tr_address const& that) const
     {
-        return tr_address_compare(this, &that) == 0;
+        return tr_address_compare(this, &that);
     }
 
-    bool operator<(tr_address const& that) const
+    [[nodiscard]] bool operator==(tr_address const& that) const
     {
-        return tr_address_compare(this, &that) < 0;
+        return compare(that) == 0;
     }
 
-    bool operator>(tr_address const& that) const
+    [[nodiscard]] bool operator<(tr_address const& that) const
     {
-        return tr_address_compare(this, &that) > 0;
+        return compare(that) < 0;
+    }
+
+    [[nodiscard]] bool operator>(tr_address const& that) const
+    {
+        return compare(that) > 0;
     }
 };
 
@@ -156,6 +161,6 @@ void tr_netSetTOS(tr_socket_t sock, int tos, tr_address_type type);
  * @brief get a human-representable string representing the network error.
  * @param err an errno on Unix/Linux and an WSAError on win32)
  */
-char* tr_net_strerror(char* buf, size_t buflen, int err);
+std::string tr_net_strerror(int err);
 
 unsigned char const* tr_globalIPv6(tr_session const* session);
