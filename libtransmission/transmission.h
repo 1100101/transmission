@@ -744,11 +744,29 @@ bool tr_sessionIsScriptEnabled(tr_session const*, TrScript);
 
 enum tr_log_level
 {
-    TR_LOG_SILENT = 0,
-    TR_LOG_ERROR = 1,
-    TR_LOG_INFO = 2,
-    TR_LOG_DEBUG = 3,
-    TR_LOG_FIREHOSE = 4
+    // No logging at all
+    TR_LOG_OFF,
+
+    // Errors that prevent Transmission from running
+    TR_LOG_CRITICAL,
+
+    // Errors that could prevent a single torrent from running, e.g. missing
+    // files or a private torrent's tracker responding "unregistered torrent"
+    TR_LOG_ERROR,
+
+    // Smaller errors that don't stop the overall system,
+    // e.g. unable to preallocate a file, or unable to connect to a tracker
+    // when other trackers are available
+    TR_LOG_WARN,
+
+    // User-visible info, e.g. "torrent completed" or "running script"
+    TR_LOG_INFO,
+
+    // Debug messages
+    TR_LOG_DEBUG,
+
+    // High-volume debug messages, e.g. tracing peer protocol messages
+    TR_LOG_TRACE
 };
 
 void tr_logSetLevel(tr_log_level);
@@ -1681,9 +1699,9 @@ struct tr_stat
         or 0 if you can't */
     time_t manualAnnounceTime;
 
-    /** Total uploaded bytes / total torrent size.
+    /** Total uploaded bytes / sizeWhenDone.
         NB: In Transmission 3.00 and earlier, this was total upload / download,
-        which caused edge cases when total download was less than the total size. */
+        which caused edge cases when total download was less than sizeWhenDone. */
     float ratio;
 
     /** When the torrent was first added. */

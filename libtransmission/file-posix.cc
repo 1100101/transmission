@@ -51,6 +51,8 @@
 #define USE_COPY_FILE_RANGE
 #endif /* __linux__ */
 
+#include <fmt/core.h>
+
 #include "transmission.h"
 #include "error.h"
 #include "file.h"
@@ -265,7 +267,11 @@ FAILURE:
     TR_ASSERT(!ret);
     TR_ASSERT(my_error != nullptr);
 
-    tr_logAddError(_("Couldn't create \"%1$s\": %2$s"), path, my_error->message);
+    tr_logAddError(fmt::format(
+        _("Couldn't create '{path}': {error} ({error_code})"),
+        fmt::arg("path", path),
+        fmt::arg("error", my_error->message),
+        fmt::arg("error_code", my_error->code)));
     tr_error_propagate(error, &my_error);
 
 CLEANUP:
@@ -780,7 +786,7 @@ bool tr_sys_file_read_at(
 
     static_assert(sizeof(*bytes_read) >= sizeof(my_bytes_read));
 
-    if (my_bytes_read != -1)
+    if (my_bytes_read > 0)
     {
         if (bytes_read != nullptr)
         {

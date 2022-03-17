@@ -2,43 +2,44 @@
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
+#include <cstdint>
+#include <string_view>
+
 #include <event2/event.h>
 
-#include <cstdint>
+#include <fmt/core.h>
+#include <fmt/format.h>
+
 #include <libutp/utp.h>
 
 #include "transmission.h"
+
+#include "crypto-utils.h" /* tr_rand_int_weak() */
 #include "log.h"
 #include "net.h"
-#include "session.h"
-#include "crypto-utils.h" /* tr_rand_int_weak() */
 #include "peer-mgr.h"
 #include "peer-socket.h"
+#include "session.h"
 #include "tr-utp.h"
 #include "utils.h"
 
+static auto constexpr LogName = std::string_view{ "utp" };
+
 #ifndef WITH_UTP
-
-static char constexpr MyName[] = "UTP";
-
-#define dbgmsg(...) tr_logAddDeepNamed(MyName, __VA_ARGS__)
 
 void UTP_Close(struct UTPSocket* socket)
 {
-    tr_logAddNamedError(MyName, "UTP_Close(%p) was called.", socket);
-    dbgmsg("UTP_Close(%p) was called.", socket);
+    tr_logAddNamedTrace(LogName, fmt::format("UTP_Close({}) was called.", fmt::ptr(socket)));
 }
 
 void UTP_RBDrained(struct UTPSocket* socket)
 {
-    tr_logAddNamedError(MyName, "UTP_RBDrained(%p) was called.", socket);
-    dbgmsg("UTP_RBDrained(%p) was called.", socket);
+    tr_logAddNamedTrace(LogName, fmt::format("UTP_RBDrained({}) was called.", fmt::ptr(socket)));
 }
 
 bool UTP_Write(struct UTPSocket* socket, size_t count)
 {
-    tr_logAddNamedError(MyName, "UTP_RBDrained(%p, %zu) was called.", socket, count);
-    dbgmsg("UTP_RBDrained(%p, %zu) was called.", socket, count);
+    tr_logAddNamedTrace(LogName, fmt::format("UTP_Write({}, {}) was called.", fmt::ptr(socket), count));
     return false;
 }
 
@@ -99,7 +100,7 @@ static void incoming(void* vsession, struct UTPSocket* s)
 
     if (!tr_address_from_sockaddr_storage(&addr, &port, &from_storage))
     {
-        tr_logAddNamedError("UTP", "Unknown socket family");
+        tr_logAddNamedWarn(LogName, _("Unknown socket family"));
         UTP_Close(s);
         return;
     }

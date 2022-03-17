@@ -11,6 +11,8 @@
 #include <atomic> /* atomic, atomic_fetch_add_explicit, memory_order_relaxed */
 
 #include <libtransmission/transmission.h>
+
+#include <libtransmission/log.h>
 #include <libtransmission/torrent-metainfo.h>
 #include <libtransmission/utils.h>
 #include <libtransmission/variant.h>
@@ -252,6 +254,7 @@ static void removeKeRangerRansomware()
 
 @property(nonatomic, readonly) NSMutableArray* fTorrents;
 @property(nonatomic, readonly) NSMutableArray* fDisplayedTorrents;
+@property(nonatomic, readonly) NSMutableDictionary* fTorrentHashes;
 
 @property(nonatomic, readonly) InfoWindowController* fInfoController;
 @property(nonatomic) MessageWindowController* fMessageController;
@@ -514,6 +517,7 @@ static void removeKeRangerRansomware()
 
         _fTorrents = [[NSMutableArray alloc] init];
         _fDisplayedTorrents = [[NSMutableArray alloc] init];
+        _fTorrentHashes = [[NSMutableDictionary alloc] init];
 
         _fInfoController = [[InfoWindowController alloc] init];
 
@@ -642,8 +646,33 @@ static void removeKeRangerRansomware()
     {
         NSLog(@"Could not IORegisterForSystemPower");
     }
+    
+    auto* const session = self.fLib;
 
     //load previous transfers
+    tr_ctor* ctor = tr_ctorNew(session);
+    tr_ctorSetPaused(ctor, TR_FORCE, true); // paused by default; unpause below after checking state history
+    int n_torrents = 0;
+    tr_torrent** loaded_torrents = tr_sessionLoadTorrents(session, ctor, &n_torrents);
+    tr_ctorFree(ctor);
+        
+    // process the loaded torrents
+    for (int i = 0; i < n_torrents; ++i)
+    {
+        struct tr_torrent* tor = loaded_torrents[i];
+        NSString* location;
+        if (tr_torrentGetDownloadDir(tor) != NULL)
+        {
+            location = @(tr_torrentGetDownloadDir(tor));
+        }
+        Torrent* torrent = [[Torrent alloc] initWithTorrentStruct:tor location:location lib:self.fLib];
+        [self.fTorrents addObject:torrent];
+        self.fTorrentHashes[torrent.hashString] = torrent;
+    }
+        
+        
+    //update previous transfers state by recreating a torrent from history
+    //and comparing to torrents already loaded via tr_sessionLoadTorrents
     NSString* historyFile = [self.fConfigDirectory stringByAppendingPathComponent:TRANSFER_PLIST];
     NSArray* history = [NSArray arrayWithContentsOfFile:historyFile];
     if (!history)
@@ -661,13 +690,14 @@ static void removeKeRangerRansomware()
         NSMutableArray* waitToStartTorrents = [NSMutableArray
             arrayWithCapacity:((history.count > 0 && !self.fPauseOnLaunch) ? history.count - 1 : 0)];
 
+        Torrent *t = [[Torrent alloc] init];
         for (NSDictionary* historyItem in history)
         {
-            Torrent* torrent;
-            if ((torrent = [[Torrent alloc] initWithHistory:historyItem lib:self.fLib forcePause:self.fPauseOnLaunch]))
-            {
-                [self.fTorrents addObject:torrent];
-
+            NSString *hash = historyItem[@"TorrentHash"];
+            if ([self.fTorrentHashes.allKeys containsObject:hash]) {
+                Torrent *torrent = self.fTorrentHashes[hash];
+                [t setResumeStatusForTorrent:torrent withHistory:historyItem forcePause:self.fPauseOnLaunch];
+                
                 NSNumber* waitToStart;
                 if (!self.fPauseOnLaunch && (waitToStart = historyItem[@"WaitToStart"]) && waitToStart.boolValue)
                 {
@@ -2456,6 +2486,7 @@ static void removeKeRangerRansomware()
     for (Torrent* torrent in self.fTorrents)
     {
         [history addObject:torrent.history];
+        self.fTorrentHashes[torrent.hashString] = torrent;
     }
 
     NSString* historyFile = [self.fConfigDirectory stringByAppendingPathComponent:TRANSFER_PLIST];
@@ -2669,7 +2700,7 @@ static void removeKeRangerRansomware()
 - (void)applyFilter
 {
     NSString* filterType = [self.fDefaults stringForKey:@"Filter"];
-    BOOL filterActive = NO, filterDownload = NO, filterSeed = NO, filterPause = NO, filterStatus = YES;
+    BOOL filterActive = NO, filterDownload = NO, filterSeed = NO, filterPause = NO, filterError = NO, filterStatus = YES;
     if ([filterType isEqualToString:FILTER_ACTIVE])
     {
         filterActive = YES;
@@ -2686,6 +2717,10 @@ static void removeKeRangerRansomware()
     {
         filterPause = YES;
     }
+    else if ([filterType isEqualToString:FILTER_ERROR])
+    {
+        filterError = YES;
+    }
     else
     {
         filterStatus = NO;
@@ -2701,12 +2736,13 @@ static void removeKeRangerRansomware()
     }
     BOOL const filterTracker = searchStrings && [[self.fDefaults stringForKey:@"FilterSearchType"] isEqualToString:FILTER_TYPE_TRACKER];
 
-    std::atomic<int32_t> active{0}, downloading{0}, seeding{0}, paused{0};
+    std::atomic<int32_t> active{0}, downloading{0}, seeding{0}, paused{0}, error{0};
     // Pointers to be captured by Obj-C Block as const*
     auto* activeRef = &active;
     auto* downloadingRef = &downloading;
     auto* seedingRef = &seeding;
     auto* pausedRef = &paused;
+    auto* errorRef = &error;
     //filter & get counts of each type
     NSIndexSet* indexesOfNonFilteredTorrents = [self.fTorrents
         indexesOfObjectsWithOptions:NSEnumerationConcurrent passingTest:^BOOL(Torrent* torrent, NSUInteger idx, BOOL* stop) {
@@ -2734,6 +2770,13 @@ static void removeKeRangerRansomware()
                     {
                         return NO;
                     }
+                }
+            }
+            else if (torrent.error) {
+                std::atomic_fetch_add_explicit(errorRef, 1, std::memory_order_relaxed);
+                if (filterStatus && !filterError)
+                {
+                    return NO;
                 }
             }
             else
@@ -2808,7 +2851,8 @@ static void removeKeRangerRansomware()
                               active:active.load()
                          downloading:downloading.load()
                              seeding:seeding.load()
-                              paused:paused.load()];
+                              paused:paused.load()
+                               error:error.load()];
     }
 
     //if either the previous or current lists are blank, set its value to the other

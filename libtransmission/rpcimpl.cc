@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include <fmt/core.h>
+
 #include <libdeflate.h>
 
 #include "transmission.h"
@@ -38,19 +40,13 @@
 #include "web-utils.h"
 #include "web.h"
 
-static auto constexpr RpcVersion = int64_t{ 17 };
-static auto constexpr RpcVersionMin = int64_t{ 14 };
-static char constexpr RpcVersionSemver[] = "5.3.0";
-
-static auto constexpr RecentlyActiveSeconds = time_t{ 60 };
-
 using namespace std::literals;
 
-#if 0
-#define dbgmsg(fmt, ...) fprintf(stderr, "%s:%d " fmt "\n", __FILE__, __LINE__, __VA_ARGS__)
-#else
-#define dbgmsg(...) tr_logAddDeepNamed("RPC", __VA_ARGS__)
-#endif
+static auto constexpr LogName = "rpc"sv;
+static auto constexpr RecentlyActiveSeconds = time_t{ 60 };
+static auto constexpr RpcVersion = int64_t{ 17 };
+static auto constexpr RpcVersionMin = int64_t{ 14 };
+static auto constexpr RpcVersionSemver = "5.3.0"sv;
 
 enum class TrFormat
 {
@@ -680,7 +676,7 @@ static void initField(tr_torrent const* const tor, tr_stat const* const st, tr_v
         {
             auto const bytes = tor->createPieceBitfield();
             auto const enc = tr_base64_encode({ reinterpret_cast<char const*>(std::data(bytes)), std::size(bytes) });
-            tr_variantInitStrView(initme, enc);
+            tr_variantInitStr(initme, enc);
         }
         else
         {
@@ -1518,11 +1514,13 @@ static void onMetadataFetched(tr_web::FetchResponse const& web_response)
     auto const& [status, body, did_connect, did_timeout, user_data] = web_response;
     auto* data = static_cast<struct add_torrent_idle_data*>(user_data);
 
-    dbgmsg(
-        "torrentAdd: HTTP response code was %ld (%s); response length was %zu bytes",
-        status,
-        tr_webGetResponseStr(status),
-        std::size(body));
+    tr_logAddNamedTrace(
+        LogName,
+        fmt::format(
+            "torrentAdd: HTTP response code was {} ({}); response length was {} bytes",
+            status,
+            tr_webGetResponseStr(status),
+            std::size(body)));
 
     if (status == 200 || status == 221) /* http or ftp success.. */
     {
@@ -1660,7 +1658,7 @@ static char const* torrentAdd(tr_session* session, tr_variant* args_in, tr_varia
         tr_ctorSetLabels(ctor, std::move(labels));
     }
 
-    dbgmsg("torrentAdd: filename is \"%" TR_PRIsv "\"", TR_PRIsv_ARG(filename));
+    tr_logAddNamedTrace(LogName, fmt::format("torrentAdd: filename is '{}'", filename));
 
     if (isCurlURL(filename))
     {

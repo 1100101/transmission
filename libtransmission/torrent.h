@@ -27,6 +27,7 @@
 #include "file.h"
 #include "file-piece-map.h"
 #include "interned-string.h"
+#include "log.h"
 #include "session.h"
 #include "torrent-metainfo.h"
 #include "tr-macros.h"
@@ -189,47 +190,52 @@ public:
 
     /// COMPLETION
 
-    [[nodiscard]] uint64_t leftUntilDone() const
+    [[nodiscard]] auto leftUntilDone() const
     {
         return completion.leftUntilDone();
     }
 
-    [[nodiscard]] bool hasAll() const
+    [[nodiscard]] auto sizeWhenDone() const
+    {
+        return completion.sizeWhenDone();
+    }
+
+    [[nodiscard]] auto hasAll() const
     {
         return completion.hasAll();
     }
 
-    [[nodiscard]] bool hasNone() const
+    [[nodiscard]] auto hasNone() const
     {
         return completion.hasNone();
     }
 
-    [[nodiscard]] bool hasPiece(tr_piece_index_t piece) const
+    [[nodiscard]] auto hasPiece(tr_piece_index_t piece) const
     {
         return completion.hasPiece(piece);
     }
 
-    [[nodiscard]] bool hasBlock(tr_block_index_t block) const
+    [[nodiscard]] auto hasBlock(tr_block_index_t block) const
     {
         return completion.hasBlock(block);
     }
 
-    [[nodiscard]] size_t countMissingBlocksInPiece(tr_piece_index_t piece) const
+    [[nodiscard]] auto countMissingBlocksInPiece(tr_piece_index_t piece) const
     {
         return completion.countMissingBlocksInPiece(piece);
     }
 
-    [[nodiscard]] size_t countMissingBytesInPiece(tr_piece_index_t piece) const
+    [[nodiscard]] auto countMissingBytesInPiece(tr_piece_index_t piece) const
     {
         return completion.countMissingBytesInPiece(piece);
     }
 
-    [[nodiscard]] uint64_t hasTotal() const
+    [[nodiscard]] auto hasTotal() const
     {
         return completion.hasTotal();
     }
 
-    [[nodiscard]] std::vector<uint8_t> createPieceBitfield() const
+    [[nodiscard]] auto createPieceBitfield() const
     {
         return completion.createPieceBitfield();
     }
@@ -777,3 +783,10 @@ tr_torrent_metainfo&& tr_ctorStealMetainfo(tr_ctor* ctor);
 bool tr_ctorSetMetainfoFromFile(tr_ctor* ctor, std::string const& filename, tr_error** error);
 bool tr_ctorSetMetainfoFromMagnetLink(tr_ctor* ctor, std::string const& filename, tr_error** error);
 void tr_ctorSetLabels(tr_ctor* ctor, tr_labels_t&& labels);
+
+#define tr_logAddCriticalTor(tor, ...) tr_logAddNamed(TR_LOG_CRITICAL, (tor)->name(), __VA_ARGS__)
+#define tr_logAddErrorTor(tor, ...) tr_logAddNamed(TR_LOG_ERROR, (tor)->name(), __VA_ARGS__)
+#define tr_logAddWarnTor(tor, ...) tr_logAddNamed(TR_LOG_WARN, (tor)->name(), __VA_ARGS__)
+#define tr_logAddInfoTor(tor, ...) tr_logAddNamed(TR_LOG_INFO, (tor)->name(), __VA_ARGS__)
+#define tr_logAddDebugTor(tor, ...) tr_logAddNamed(TR_LOG_DEBUG, (tor)->name(), __VA_ARGS__)
+#define tr_logAddTraceTor(tor, ...) tr_logAddNamed(TR_LOG_TRACE, (tor)->name(), __VA_ARGS__)

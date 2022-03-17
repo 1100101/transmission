@@ -146,6 +146,7 @@ if(WIN32)
     endforeach()
 endif()
 
+find_package(Fmt)
 find_package(UtfCpp)
 find_package(Threads)
 find_package(PkgConfig QUIET)
@@ -341,6 +342,8 @@ tr_add_external_auto_library(NATPMP libnatpmp natpmp)
 if(NOT USE_SYSTEM_NATPMP)
     set(NATPMP_DEFINITIONS -DNATPMP_STATICLIB)
 endif()
+
+set(LIBFMT_DEFINITIONS -DFMT_HEADER_ONLY)
 
 tr_add_external_auto_library(MINIUPNPC miniupnpc miniupnpc
     CMAKE_ARGS
@@ -539,6 +542,14 @@ set(NEEDED_HEADERS
     xlocale.h)
 
 if(ENABLE_NLS)
+    check_library_exists(intl libintl_gettext "" HAVE_LIBINTL)
+    if(HAVE_LIBINTL)
+        set(LIBINTL_LIBRARY intl)
+        # check_function_exists() below may need this
+        # when looking for gettext() and ngettext()
+        list(APPEND CMAKE_REQUIRED_LIBRARIES intl)
+    endif()
+
     list(APPEND NEEDED_HEADERS libintl.h)
 endif()
 
@@ -559,12 +570,14 @@ set(NEEDED_FUNCTIONS
     fallocate64
     flock
     getmntent
+    gettext
     gmtime_r
     gmtime_s
     htonll
     localtime_r
     localtime_s
     mkdtemp
+    ngettext
     ntohll
     posix_fadvise
     posix_fallocate
@@ -597,13 +610,6 @@ endif()
 #         add_definitions(-D__USE_MINGW_ANSI_STDIO=1 -D__STDC_FORMAT_MACROS=1)
 #     endif()
 # endif()
-
-if(ENABLE_NLS)
-    check_library_exists(intl libintl_gettext "" HAVE_LIBINTL)
-    if(HAVE_LIBINTL)
-        set(LIBINTL_LIBRARY intl)
-    endif()
-endif()
 
 check_library_exists(m sqrt "" HAVE_LIBM)
 if(HAVE_LIBM)

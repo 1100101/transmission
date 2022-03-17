@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstdarg>
 #include <cstdio>
+#include <map>
 #include <mutex>
 
 #include <event2/buffer.h>
@@ -28,16 +29,6 @@ static tr_log_message* myQueue = nullptr;
 static tr_log_message** myQueueTail = &myQueue;
 static int myQueueLength = 0;
 
-#ifndef _WIN32
-
-/* make null versions of these win32 functions */
-static inline bool IsDebuggerPresent()
-{
-    return false;
-}
-
-#endif
-
 /***
 ****
 ***/
@@ -53,7 +44,7 @@ tr_log_level tr_logGetLevel()
 
 static std::recursive_mutex message_mutex_;
 
-tr_sys_file_t tr_logGetFile()
+static tr_sys_file_t tr_logGetFile()
 {
     static bool initialized = false;
     static tr_sys_file_t file = TR_BAD_SYS_FILE;
@@ -141,100 +132,26 @@ char* tr_logGetTimeStr(char* buf, size_t buflen)
     return buf;
 }
 
-bool tr_logGetDeepEnabled()
-{
-    static int8_t deepLoggingIsActive = -1;
-
-    if (deepLoggingIsActive < 0)
-    {
-        deepLoggingIsActive = (int8_t)(IsDebuggerPresent() || tr_logGetFile() != TR_BAD_SYS_FILE);
-    }
-
-    return deepLoggingIsActive != 0;
-}
-
-void tr_logAddDeep(char const* file, int line, char const* name, char const* fmt, ...)
-{
-    tr_sys_file_t const fp = tr_logGetFile();
-
-    if (fp != TR_BAD_SYS_FILE || IsDebuggerPresent())
-    {
-        struct evbuffer* buf = evbuffer_new();
-        char* base = tr_sys_path_basename(file, nullptr);
-
-        char timestr[64];
-        evbuffer_add_printf(buf, "[%s] ", tr_logGetTimeStr(timestr, sizeof(timestr)));
-
-        if (name != nullptr)
-        {
-            evbuffer_add_printf(buf, "%s ", name);
-        }
-
-        va_list args;
-        va_start(args, fmt);
-        evbuffer_add_vprintf(buf, fmt, args);
-        va_end(args);
-        evbuffer_add_printf(buf, " (%s:%d)" TR_NATIVE_EOL_STR, base, line);
-
-        auto const message = evbuffer_free_to_str(buf);
-
-#ifdef _WIN32
-        OutputDebugStringA(message.c_str());
-#endif
-
-        if (fp != TR_BAD_SYS_FILE)
-        {
-            tr_sys_file_write(fp, std::data(message), std::size(message), nullptr, nullptr);
-        }
-
-        tr_free(base);
-    }
-}
-
 /***
 ****
 ***/
 
-void tr_logAddMessage(
+void logAddImpl(
     [[maybe_unused]] char const* file,
     [[maybe_unused]] int line,
-    [[maybe_unused]] tr_log_level level,
-    [[maybe_unused]] char const* name,
-    char const* fmt,
-    ...)
+    tr_log_level level,
+    [[maybe_unused]] std::string_view name,
+    std::string_view msg)
 {
-    int const err = errno; /* message logging shouldn't affect errno */
-    char buf[1024];
-    va_list ap;
-
-    auto const lock = std::lock_guard(message_mutex_);
-
-    /* build the text message */
-    *buf = '\0';
-    va_start(ap, fmt);
-    int const buf_len = evutil_vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-
-    if (buf_len < 0)
+    if (std::empty(msg))
     {
-        errno = err;
         return;
     }
 
+    auto const lock = std::lock_guard(message_mutex_);
 #ifdef _WIN32
 
-    if ((size_t)buf_len < sizeof(buf) - 3)
-    {
-        buf[buf_len + 0] = '\r';
-        buf[buf_len + 1] = '\n';
-        buf[buf_len + 2] = '\0';
-        OutputDebugStringA(buf);
-        buf[buf_len + 0] = '\0';
-    }
-    else
-    {
-        OutputDebugStringA(buf);
-    }
+    OutputDebugStringA(tr_strvJoin(msg, "\r\n").c_str());
 
 #elif defined(__ANDROID__)
 
@@ -242,8 +159,14 @@ void tr_logAddMessage(
 
     switch (level)
     {
+    case TR_LOG_CRITICAL:
+        prio = ANDROID_LOG_FATAL;
+        break;
     case TR_LOG_ERROR:
         prio = ANDROID_LOG_ERROR;
+        break;
+    case TR_LOG_WARN:
+        prio = ANDROID_LOG_WARN;
         break;
     case TR_LOG_INFO:
         prio = ANDROID_LOG_INFO;
@@ -251,64 +174,127 @@ void tr_logAddMessage(
     case TR_LOG_DEBUG:
         prio = ANDROID_LOG_DEBUG;
         break;
-    default:
+    case TR_LOG_TRACE:
         prio = ANDROID_LOG_VERBOSE;
     }
 
 #ifdef NDEBUG
-    __android_log_print(prio, "transmission", "%s", buf);
+    __android_log_print(prio, "transmission", "%" TR_PRIsv, TR_PRIsv_ARG(msg));
 #else
-    __android_log_print(prio, "transmission", "[%s:%d] %s", file, line, buf);
+    __android_log_print(prio, "transmission", "[%s:%d] %" TR_PRIsv, file, line, TR_PRIsv_ARG(msg));
 #endif
 
 #else
 
-    if (!tr_str_is_empty(buf))
+    if (tr_logGetQueueEnabled())
     {
-        if (tr_logGetQueueEnabled())
+        auto* const newmsg = tr_new0(tr_log_message, 1);
+        newmsg->level = level;
+        newmsg->when = tr_time();
+        newmsg->message = tr_strvDup(msg);
+        newmsg->file = file;
+        newmsg->line = line;
+        newmsg->name = tr_strvDup(name);
+
+        *myQueueTail = newmsg;
+        myQueueTail = &newmsg->next;
+        ++myQueueLength;
+
+        if (myQueueLength > TR_LOG_MAX_QUEUE_LENGTH)
         {
-            auto* const newmsg = tr_new0(tr_log_message, 1);
-            newmsg->level = level;
-            newmsg->when = tr_time();
-            newmsg->message = tr_strndup(buf, buf_len);
-            newmsg->file = file;
-            newmsg->line = line;
-            newmsg->name = tr_strdup(name);
-
-            *myQueueTail = newmsg;
-            myQueueTail = &newmsg->next;
-            ++myQueueLength;
-
-            if (myQueueLength > TR_LOG_MAX_QUEUE_LENGTH)
-            {
-                tr_log_message* old = myQueue;
-                myQueue = old->next;
-                old->next = nullptr;
-                tr_logFreeQueue(old);
-                --myQueueLength;
-                TR_ASSERT(myQueueLength == TR_LOG_MAX_QUEUE_LENGTH);
-            }
-        }
-        else
-        {
-            char timestr[64];
-
-            tr_sys_file_t fp = tr_logGetFile();
-
-            if (fp == TR_BAD_SYS_FILE)
-            {
-                fp = tr_sys_file_get_std(TR_STD_SYS_FILE_ERR, nullptr);
-            }
-
-            tr_logGetTimeStr(timestr, sizeof(timestr));
-
-            auto const out = name != nullptr ? tr_strvJoin("["sv, timestr, "] "sv, name, ": "sv, buf) :
-                                               tr_strvJoin("["sv, timestr, "] "sv, buf);
-            tr_sys_file_write_line(fp, out, nullptr);
-            tr_sys_file_flush(fp, nullptr);
+            tr_log_message* old = myQueue;
+            myQueue = old->next;
+            old->next = nullptr;
+            tr_logFreeQueue(old);
+            --myQueueLength;
+            TR_ASSERT(myQueueLength == TR_LOG_MAX_QUEUE_LENGTH);
         }
     }
+    else
+    {
+        char timestr[64];
+
+        tr_sys_file_t fp = tr_logGetFile();
+
+        if (fp == TR_BAD_SYS_FILE)
+        {
+            fp = tr_sys_file_get_std(TR_STD_SYS_FILE_ERR, nullptr);
+        }
+
+        tr_logGetTimeStr(timestr, sizeof(timestr));
+
+        auto const out = !std::empty(name) ? tr_strvJoin("["sv, timestr, "] "sv, name, ": "sv, msg) :
+                                             tr_strvJoin("["sv, timestr, "] "sv, msg);
+        tr_sys_file_write_line(fp, out, nullptr);
+        tr_sys_file_flush(fp, nullptr);
+    }
 #endif
+}
+
+void tr_logAddMessage(char const* file, int line, tr_log_level level, std::string_view name, std::string_view msg)
+{
+    // message logging shouldn't affect errno
+    int const err = errno;
+
+    // skip unwanted messages
+    if (!tr_logLevelIsActive(level))
+    {
+        errno = err;
+        return;
+    }
+
+    auto const lock = std::lock_guard(message_mutex_);
+
+    // don't log the same warning ad infinitum.
+    // it's not useful after some point.
+    bool last_one = false;
+    if (level == TR_LOG_CRITICAL || level == TR_LOG_ERROR || level == TR_LOG_WARN)
+    {
+        static auto constexpr MaxRepeat = size_t{ 30 };
+        static auto counts = new std::map<std::pair<char const*, int>, size_t>{};
+
+        auto& count = (*counts)[std::make_pair(file, line)];
+        ++count;
+        last_one = count == MaxRepeat;
+        if (count > MaxRepeat)
+        {
+            errno = err;
+            return;
+        }
+    }
+
+    // log the messages
+    logAddImpl(file, line, level, name, msg);
+    if (last_one)
+    {
+        logAddImpl(file, line, level, "", _("Too many messages like this! I won't log this message anymore this session."));
+    }
 
     errno = err;
+}
+
+void tr_logAddMessage(
+    [[maybe_unused]] char const* file,
+    [[maybe_unused]] int line,
+    tr_log_level level,
+    [[maybe_unused]] std::string_view name,
+    char const* fmt,
+    ...)
+{
+    // message logging shouldn't affect errno
+    int const err = errno;
+
+    // build the message
+    auto buf = std::array<char, 2048>{};
+    va_list ap;
+    va_start(ap, fmt);
+    int const buf_len = evutil_vsnprintf(std::data(buf), std::size(buf), fmt, ap);
+    va_end(ap);
+    if (buf_len <= 0)
+    {
+        errno = err;
+        return;
+    }
+
+    tr_logAddMessage(file, line, level, name, std::string_view{ std::data(buf) });
 }

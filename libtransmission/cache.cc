@@ -8,20 +8,19 @@
 
 #include <event2/buffer.h>
 
+#include <fmt/core.h>
+
 #include "transmission.h"
 #include "cache.h"
 #include "inout.h"
 #include "log.h"
-#include "peer-common.h" /* MAX_BLOCK_SIZE */
 #include "ptrarray.h"
 #include "torrent.h"
 #include "tr-assert.h"
 #include "trevent.h"
 #include "utils.h"
 
-static char constexpr MyName[] = "Cache";
-
-#define dbgmsg(...) tr_logAddDeepNamed(MyName, __VA_ARGS__)
+auto constexpr LogName = std::string_view{ "cache" };
 
 /****
 *****
@@ -157,7 +156,7 @@ static int calcRuns(tr_cache const* cache, struct run_info* runs)
 static int flushContiguous(tr_cache* cache, int pos, int n)
 {
     int err = 0;
-    auto* const buf = tr_new(uint8_t, n * MAX_BLOCK_SIZE);
+    auto* const buf = tr_new(uint8_t, n * tr_block_info::BlockSize);
     auto* walk = buf;
     auto** blocks = (struct cache_block**)tr_ptrArrayBase(&cache->blocks);
 
@@ -237,7 +236,7 @@ static int cacheTrim(tr_cache* cache)
 
 static int getMaxBlocks(int64_t max_bytes)
 {
-    return max_bytes / (double)MAX_BLOCK_SIZE;
+    return max_bytes / static_cast<double>(tr_block_info::BlockSize);
 }
 
 int tr_cacheSetLimit(tr_cache* cache, int64_t max_bytes)
@@ -245,11 +244,9 @@ int tr_cacheSetLimit(tr_cache* cache, int64_t max_bytes)
     cache->max_bytes = max_bytes;
     cache->max_blocks = getMaxBlocks(max_bytes);
 
-    tr_logAddNamedDbg(
-        MyName,
-        "Maximum cache size set to %s (%d blocks)",
-        tr_formatter_mem_B(cache->max_bytes).c_str(),
-        cache->max_blocks);
+    tr_logAddNamedDebug(
+        LogName,
+        fmt::format("Maximum cache size set to {} ({} blocks)", tr_formatter_mem_B(cache->max_bytes), cache->max_blocks));
 
     return cacheTrim(cache);
 }
@@ -409,8 +406,9 @@ int tr_cacheFlushFile(tr_cache* cache, tr_torrent* torrent, tr_file_index_t i)
 {
     auto const [begin, end] = tr_torGetFileBlockSpan(torrent, i);
 
-    int pos = findBlockPos(cache, torrent, torrent->blockLoc(begin));
-    dbgmsg("flushing file %d from cache to disk: blocks [%zu...%zu)", (int)i, (size_t)begin, (size_t)end);
+    int const pos = findBlockPos(cache, torrent, torrent->blockLoc(begin));
+
+    tr_logAddNamedTrace(LogName, fmt::format("flushing file {} from cache to disk: blocks [{}...{})", i, begin, end));
 
     /* flush out all the blocks in that file */
     int err = 0;

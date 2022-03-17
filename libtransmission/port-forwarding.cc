@@ -4,9 +4,13 @@
 // License text can be found in the licenses/ folder.
 
 #include <algorithm>
+#include <string_view>
+
 #include <sys/types.h>
 
 #include <event2/event.h>
+
+#include <fmt/core.h>
 
 #include "transmission.h"
 #include "natpmp_local.h"
@@ -20,10 +24,7 @@
 #include "upnp.h"
 #include "utils.h"
 
-static char const* getKey()
-{
-    return _("Port Forwarding");
-}
+static auto constexpr LogName = std::string_view{ "port-fwd" };
 
 struct tr_shared
 {
@@ -68,7 +69,8 @@ static char const* getNatStateStr(int state)
 
 static void natPulse(tr_shared* s, bool do_check)
 {
-    tr_port const private_peer_port = s->session->private_peer_port;
+    auto* session = s->session;
+    tr_port const private_peer_port = session->private_peer_port;
     bool const is_enabled = s->isEnabled && !s->isShuttingDown;
 
     if (s->natpmp == nullptr)
@@ -89,13 +91,14 @@ static void natPulse(tr_shared* s, bool do_check)
 
     if (s->natpmpStatus == TR_PORT_MAPPED)
     {
-        s->session->public_peer_port = public_peer_port;
-        s->session->private_peer_port = received_private_port;
+        session->public_peer_port = public_peer_port;
+        session->private_peer_port = received_private_port;
         tr_logAddNamedInfo(
-            getKey(),
-            "public peer port %d (private %d) ",
-            s->session->public_peer_port,
-            s->session->private_peer_port);
+            LogName,
+            fmt::format(
+                _("Mapped private port '{private_port}' to public port '{public_port}'"),
+                fmt::arg("public_port", session->public_peer_port),
+                fmt::arg("private_port", session->private_peer_port)));
     }
 
     s->upnpStatus = tr_upnpPulse(
@@ -103,17 +106,18 @@ static void natPulse(tr_shared* s, bool do_check)
         private_peer_port,
         is_enabled,
         do_check,
-        tr_address_to_string(&s->session->bind_ipv4->addr));
+        tr_address_to_string(&session->bind_ipv4->addr));
 
     auto const new_status = tr_sharedTraversalStatus(s);
 
     if (new_status != old_status)
     {
         tr_logAddNamedInfo(
-            getKey(),
-            _("State changed from \"%1$s\" to \"%2$s\""),
-            getNatStateStr(old_status),
-            getNatStateStr(new_status));
+            LogName,
+            fmt::format(
+                _("State changed from '{old_state}' to '{state}"),
+                fmt::arg("old_state", getNatStateStr(old_status)),
+                fmt::arg("state", getNatStateStr(new_status))));
     }
 }
 
@@ -202,7 +206,7 @@ static void stop_timer(tr_shared* s)
 
 static void stop_forwarding(tr_shared* s)
 {
-    tr_logAddNamedInfo(getKey(), "%s", _("Stopped"));
+    tr_logAddNamedTrace(LogName, "stopped");
     natPulse(s, false);
 
     tr_natpmpClose(s->natpmp);
