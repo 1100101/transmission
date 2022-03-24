@@ -56,8 +56,8 @@ protected:
         EXPECT_FALSE(builder->isFolder);
         EXPECT_FALSE(builder->abortFlag);
 
-        // have tr_makeMetaInfo() build the .torrent file
-        auto const torrent_file = tr_strvJoin(input_file, ".torrent");
+        // have tr_makeMetaInfo() build the torrent file
+        auto const torrent_file = tr_strvJoin(input_file, ".torrent"sv);
         tr_makeMetaInfo(
             builder,
             torrent_file.c_str(),
@@ -80,18 +80,18 @@ protected:
         }
         sync();
 
-        // now let's check our work: parse the  .torrent file
+        // now let's check our work: parse the  torrent file
         EXPECT_TRUE(metainfo.parseTorrentFile(torrent_file));
 
         // quick check of some of the parsed metainfo
         EXPECT_EQ(payloadSize, metainfo.totalSize());
-        EXPECT_EQ(makeString(tr_sys_path_basename(input_file.data(), nullptr)), metainfo.name());
+        EXPECT_EQ(tr_sys_path_basename(input_file), metainfo.name());
         EXPECT_EQ(comment, metainfo.comment());
         EXPECT_EQ(isPrivate, metainfo.isPrivate());
         EXPECT_EQ(size_t(trackerCount), std::size(metainfo.announceList()));
         EXPECT_EQ(size_t(webseedCount), metainfo.webseedCount());
         EXPECT_EQ(tr_file_index_t{ 1 }, metainfo.fileCount());
-        EXPECT_EQ(makeString(tr_sys_path_basename(input_file.data(), nullptr)), metainfo.fileSubpath(0));
+        EXPECT_EQ(tr_sys_path_basename(input_file), metainfo.fileSubpath(0));
         EXPECT_EQ(payloadSize, metainfo.fileSize(0));
 
         // cleanup
@@ -147,7 +147,7 @@ protected:
             EXPECT_EQ(payload_sizes[i], builder->files[i].size);
         }
 
-        // build the .torrent file
+        // build the torrent file
         auto torrent_file = tr_strvJoin(top, ".torrent"sv);
         tr_makeMetaInfo(
             builder,
@@ -171,15 +171,13 @@ protected:
         EXPECT_TRUE(waitFor(test, 5000));
         sync();
 
-        // now let's check our work: parse the  .torrent file
+        // now let's check our work: parse the  torrent file
         auto metainfo = tr_torrent_metainfo{};
         EXPECT_TRUE(metainfo.parseTorrentFile(torrent_file));
 
         // quick check of some of the parsed metainfo
         EXPECT_EQ(total_size, metainfo.totalSize());
-        auto* tmpstr = tr_sys_path_basename(top.c_str(), nullptr);
-        EXPECT_EQ(tmpstr, metainfo.name());
-        tr_free(tmpstr);
+        EXPECT_EQ(tr_sys_path_basename(top), metainfo.name());
         EXPECT_EQ(comment, metainfo.comment());
         EXPECT_EQ(source, metainfo.source());
         EXPECT_EQ(payload_count, metainfo.fileCount());

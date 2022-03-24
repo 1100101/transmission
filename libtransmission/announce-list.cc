@@ -225,7 +225,7 @@ bool tr_announce_list::canAdd(tr_url_parsed_t const& announce)
 
 bool tr_announce_list::save(std::string const& torrent_file, tr_error** error) const
 {
-    // load the .torrent file
+    // load the torrent file
     auto metainfo = tr_variant{};
     if (!tr_variantFromFile(&metainfo, TR_VARIANT_PARSE_BENC, std::string{ torrent_file }, error))
     {
@@ -263,7 +263,7 @@ bool tr_announce_list::save(std::string const& torrent_file, tr_error** error) c
     // confirm that it's good by parsing it back again
     auto const contents = tr_variantToStr(&metainfo, TR_VARIANT_FMT_BENC);
     tr_variantFree(&metainfo);
-    if (auto tm = tr_torrent_metainfo{}; !tm.parseBenc(contents))
+    if (auto tm = tr_torrent_metainfo{}; !tm.parseBenc(contents, error))
     {
         return false;
     }

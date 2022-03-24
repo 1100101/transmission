@@ -257,7 +257,7 @@ static bool useNewMetainfo(tr_torrent* tor, tr_incomplete_metadata const* m, tr_
         return false;
     }
 
-    // yay we have an info dict. Let's make a .torrent file
+    // yay we have an info dict. Let's make a torrent file
     auto top_v = tr_variant{};
     tr_buildMetainfoExceptInfoDict(tor->metainfo_, &top_v);
     tr_variantMergeDicts(tr_variantDictAddDict(&top_v, TR_KEY_info, 0), &info_dict_v);
@@ -265,7 +265,7 @@ static bool useNewMetainfo(tr_torrent* tor, tr_incomplete_metadata const* m, tr_
     tr_variantFree(&top_v);
     tr_variantFree(&info_dict_v);
 
-    // does this synthetic .torrent file parse?
+    // does this synthetic torrent file parse?
     auto metainfo = tr_torrent_metainfo{};
     if (!metainfo.parseBenc(benc))
     {
@@ -311,7 +311,15 @@ static void onHaveAllMetainfo(tr_torrent* tor, tr_incomplete_metadata* m)
 
         m->piecesNeededCount = n;
         char const* const msg = error != nullptr && error->message != nullptr ? error->message : "unknown error";
-        tr_logAddWarnTor(tor, fmt::format("metadata error: {}. (trying again; {} pieces left)", msg, n));
+        tr_logAddWarnTor(
+            tor,
+            fmt::format(
+                ngettext(
+                    "Couldn't parse magnet metainfo: '{error}'. Redownloading {piece_count} piece",
+                    "Couldn't parse magnet metainfo: '{error}'. Redownloading {piece_count} pieces",
+                    n),
+                fmt::arg("error", msg),
+                fmt::arg("piece_count", n)));
         tr_error_clear(&error);
     }
 }

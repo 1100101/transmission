@@ -425,14 +425,13 @@ static void utp_on_read(void* vio, unsigned char const* buf, size_t buflen)
     TR_ASSERT(tr_isPeerIo(io));
 
     int rc = evbuffer_add(io->inbuf, buf, buflen);
-    tr_logAddTraceIo(io, fmt::format("utp_on_read got {} bytes", buflen));
-
     if (rc < 0)
     {
-        tr_logAddError("On read evbuffer_add");
+        tr_logAddWarn(_("Couldn't write to peer"));
         return;
     }
 
+    tr_logAddTraceIo(io, fmt::format("utp_on_read got {} bytes", buflen));
     tr_peerIoSetEnabled(io, TR_DOWN, true);
     canReadWrapper(io);
 }
@@ -489,12 +488,12 @@ static void utp_on_state_change(void* vio, int state)
 
     if (state == UTP_STATE_CONNECT)
     {
-        tr_logAddDebugIo(io, "utp_on_state_change -- changed to connected");
+        tr_logAddTraceIo(io, "utp_on_state_change -- changed to connected");
         io->utpSupported = true;
     }
     else if (state == UTP_STATE_WRITABLE)
     {
-        tr_logAddDebugIo(io, "utp_on_state_change -- changed to writable");
+        tr_logAddTraceIo(io, "utp_on_state_change -- changed to writable");
 
         if ((io->pendingEvents & EV_WRITE) != 0)
         {

@@ -14,6 +14,8 @@
 #include <event2/buffer.h>
 
 #include <fmt/core.h>
+#include <fmt/compile.h>
+#include <fmt/format.h>
 
 #include "transmission.h"
 
@@ -247,10 +249,9 @@ void tr_logAddMessage(char const* file, int line, tr_log_level level, std::strin
     auto name_fallback = std::string{};
     if (std::empty(name))
     {
-        auto* base = tr_sys_path_basename(file, nullptr);
-        name_fallback = fmt::format("{}:{}", (base != nullptr ? base : "?"), line);
+        auto const base = tr_sys_path_basename(file);
+        name_fallback = fmt::format(FMT_COMPILE("{}:{}"), !std::empty(base) ? base : "?", line);
         name = name_fallback;
-        tr_free(base);
     }
 
     // message logging shouldn't affect errno

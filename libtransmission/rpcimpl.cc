@@ -1761,8 +1761,8 @@ static char const* groupSet(
     auto& group = session->getBandwidthGroup(name);
     auto limits = group.getLimits();
 
-    tr_variantDictFindBool(args_in, TR_KEY_speed_limit_down_enabled, &limits.down_limited);
-    tr_variantDictFindBool(args_in, TR_KEY_speed_limit_up_enabled, &limits.up_limited);
+    (void)tr_variantDictFindBool(args_in, TR_KEY_speed_limit_down_enabled, &limits.down_limited);
+    (void)tr_variantDictFindBool(args_in, TR_KEY_speed_limit_up_enabled, &limits.up_limited);
 
     if (auto limit = int64_t{}; tr_variantDictFindInt(args_in, TR_KEY_speed_limit_down, &limit))
     {
@@ -2067,8 +2067,11 @@ static char const* sessionStats(
     auto cumulativeStats = tr_session_stats{};
 
     auto const& torrents = session->torrents();
-    int const total = std::size(torrents);
-    int const running = std::count_if(std::begin(torrents), std::end(torrents), [](auto const* tor) { return tor->isRunning; });
+    auto const total = std::size(torrents);
+    auto const running = std::count_if(
+        std::begin(torrents),
+        std::end(torrents),
+        [](auto const* tor) { return tor->isRunning; });
 
     tr_sessionGetStats(session, &currentStats);
     tr_sessionGetCumulativeStats(session, &cumulativeStats);
