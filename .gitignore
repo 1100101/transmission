@@ -23,5 +23,5 @@ web/node_modules
 po/*.mo
 third-party/miniupnp/miniupnpcstrings.h
 web/public_html/transmission-app.js.map
+.DS_Store
 web/public_html/transmission-app.js
-

@@ -209,7 +209,7 @@ public:
 
 struct tr_peerMgr
 {
-    tr_peerMgr(tr_session* session_in)
+    explicit tr_peerMgr(tr_session* session_in)
         : session{ session_in }
     {
     }
@@ -315,7 +315,7 @@ static struct peer_atom* getExistingAtom(tr_swarm const* cswarm, tr_address cons
 
 static bool peerIsInUse(tr_swarm const* cs, struct peer_atom const* atom)
 {
-    auto* s = const_cast<tr_swarm*>(cs);
+    auto const* const s = const_cast<tr_swarm*>(cs);
     auto const lock = s->manager->unique_lock();
 
     return atom->peer != nullptr || s->outgoing_handshakes.count(atom->addr) != 0 ||
@@ -1105,7 +1105,7 @@ void tr_peerMgrAddIncoming(tr_peerMgr* manager, tr_address const* addr, tr_port 
 
         tr_peerIoUnref(io); /* balanced by the implicit ref in tr_peerIoNewIncoming() */
 
-        manager->incoming_handshakes.insert({ *addr, handshake });
+        manager->incoming_handshakes.try_emplace(*addr, handshake);
     }
 }
 
@@ -1481,7 +1481,7 @@ void tr_peerUpdateProgress(tr_torrent* tor, tr_peer* peer)
     {
         float const true_count = have->count();
 
-        if (tor->hasMetadata())
+        if (tor->hasMetainfo())
         {
             peer->progress = true_count / float(tor->pieceCount());
         }
@@ -1531,7 +1531,7 @@ void tr_peerMgrTorrentAvailability(tr_torrent const* tor, int8_t* tab, unsigned 
 
     std::fill_n(tab, tabCount, int8_t{});
 
-    if (tor->hasMetadata())
+    if (tor->hasMetainfo())
     {
         int const peerCount = tr_ptrArraySize(&tor->swarm->peers);
         auto const** peers = (tr_peer const**)tr_ptrArrayBase(&tor->swarm->peers);
@@ -1599,7 +1599,7 @@ uint64_t tr_peerMgrGetDesiredAvailable(tr_torrent const* tor)
 
     // common shortcuts...
 
-    if (!tor->isRunning || tor->isStopping || tor->isDone() || !tor->hasMetadata())
+    if (!tor->isRunning || tor->isStopping || tor->isDone() || !tor->hasMetainfo())
     {
         return 0;
     }
@@ -3048,7 +3048,7 @@ static void initiateConnection(tr_peerMgr* mgr, tr_swarm* s, struct peer_atom* a
 
         tr_peerIoUnref(io); /* balanced by the initial ref in tr_peerIoNewOutgoing() */
 
-        s->outgoing_handshakes.insert({ atom->addr, handshake });
+        s->outgoing_handshakes.try_emplace(atom->addr, handshake);
     }
 
     atom->lastConnectionAttemptAt = now;

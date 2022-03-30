@@ -45,6 +45,7 @@
 #include "torrent.h"
 #include "tr-assert.h"
 #include "tr-dht.h"
+#include "tr-strbuf.h"
 #include "trevent.h"
 #include "utils.h"
 #include "variant.h"
@@ -178,8 +179,8 @@ static void dht_boostrap_from_file(tr_session* session)
 static void dht_bootstrap(void* closure)
 {
     auto* const cl = static_cast<struct bootstrap_closure*>(closure);
-    int const num = cl->len / 6;
-    int const num6 = cl->len6 / 18;
+    auto const num = cl->len / 6;
+    auto const num6 = cl->len6 / 18;
 
     if (session_ != cl->session)
     {
@@ -196,7 +197,7 @@ static void dht_bootstrap(void* closure)
         tr_logAddDebug(fmt::format("Bootstrapping from {} IPv6 nodes", num6));
     }
 
-    for (int i = 0; i < std::max(num, num6); ++i)
+    for (size_t i = 0; i < std::max(num, num6); ++i)
     {
         if (i < num && !bootstrap_done(cl->session, AF_INET))
         {
@@ -227,7 +228,7 @@ static void dht_bootstrap(void* closure)
         /* Our DHT code is able to take up to 9 nodes in a row without
            dropping any. After that, it takes some time to split buckets.
            So ping the first 8 nodes quickly, then slow down. */
-        if (i < 8)
+        if (i < 8U)
         {
             nap(2);
         }
@@ -299,9 +300,9 @@ int tr_dhtInit(tr_session* ss)
         dht_debug = stderr;
     }
 
-    auto const dat_file = tr_strvPath(ss->config_dir, "dht.dat"sv);
     auto benc = tr_variant{};
-    auto const ok = tr_variantFromFile(&benc, TR_VARIANT_PARSE_BENC, dat_file);
+    auto const dat_file = tr_pathbuf{ ss->config_dir, "/dht.dat"sv };
+    auto const ok = tr_variantFromFile(&benc, TR_VARIANT_PARSE_BENC, dat_file.sv());
 
     bool have_id = false;
     uint8_t* nodes = nullptr;
@@ -451,8 +452,8 @@ void tr_dhtUninit(tr_session* ss)
             tr_variantDictAddRaw(&benc, TR_KEY_nodes6, compact6, out6 - compact6);
         }
 
-        auto const dat_file = tr_strvPath(ss->config_dir, "dht.dat");
-        tr_variantToFile(&benc, TR_VARIANT_FMT_BENC, dat_file);
+        auto const dat_file = tr_pathbuf{ ss->config_dir, "/dht.dat" };
+        tr_variantToFile(&benc, TR_VARIANT_FMT_BENC, dat_file.sv());
         tr_variantFree(&benc);
     }
 

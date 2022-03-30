@@ -59,6 +59,7 @@
 		62F644738FE3D8788EBF73A9 /* block-info.cc in Sources */ = {isa = PBXBuildFile; fileRef = A54D44C6A7AAF131D9AE29F5 /* block-info.cc */; };
 		66F977825E65AD498C028BB0 /* announce-list.cc in Sources */ = {isa = PBXBuildFile; fileRef = 66F977825E65AD498C028BB1 /* announce-list.cc */; };
 		66F977825E65AD498C028BB2 /* announce-list.h in Headers */ = {isa = PBXBuildFile; fileRef = 66F977825E65AD498C028BB3 /* announce-list.h */; };
+		888A256631B3DE536FEB8B00 /* tr-strbuf.h in Headers */ = {isa = PBXBuildFile; fileRef = 888A256631B3DE536FEB8B01 /* tr-strbuf.h */; };
 		8D11072B0486CEB800E47090 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 089C165CFE840E0CC02AAC07 /* InfoPlist.strings */; };
 		8D11072D0486CEB800E47090 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 29B97316FDCFA39411CA2CEA /* main.mm */; settings = {ATTRIBUTES = (); }; };
 		8D11072F0486CEB800E47090 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1058C7A1FEA54F0111CA2CBB /* Cocoa.framework */; };
@@ -616,6 +617,7 @@
 		66F977825E65AD498C028BB1 /* announce-list.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "announce-list.cc"; sourceTree = "<group>"; };
 		66F977825E65AD498C028BB3 /* announce-list.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "announce-list.h"; sourceTree = "<group>"; };
 		6A044CBD8C049AFCBD4DB411 /* block-info.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "block-info.h"; sourceTree = SOURCE_ROOT; };
+		888A256631B3DE536FEB8B01 /* tr-strbuf.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "tr-strbuf.h"; sourceTree = "<group>"; };
 		8D1107310486CEB800E47090 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8D1107320486CEB800E47090 /* Transmission.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Transmission.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200B8390A2263BA007BBB1E /* InfoWindowController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = InfoWindowController.h; sourceTree = "<group>"; };
@@ -1542,6 +1544,7 @@
 				A22CFCA60FC24ED80009BD3E /* tr-dht.cc */,
 				A22CFCA70FC24ED80009BD3E /* tr-dht.h */,
 				C1425B341EE9C5EA001DB85F /* tr-macros.h */,
+				888A256631B3DE536FEB8B01 /* tr-strbuf.h */,
 				C1425B351EE9C5EA001DB85F /* peer-socket.h */,
 				A284214212DA663E00FBDDBB /* tr-udp.cc */,
 				A284214312DA663E00FBDDBB /* tr-udp.h */,
@@ -2067,6 +2070,7 @@
 				BEFC1E3B0C07861A00B0BB3C /* platform.h in Headers */,
 				C1425B361EE9C605001DB85F /* tr-assert.h in Headers */,
 				C1425B371EE9C705001DB85F /* tr-macros.h in Headers */,
+				888A256631B3DE536FEB8B00 /* tr-strbuf.h in Headers */,
 				C1425B381EE9C805001DB85F /* peer-socket.h in Headers */,
 				BEFC1E450C07861A00B0BB3C /* net.h in Headers */,
 				BEFC1E4D0C07861A00B0BB3C /* session.h in Headers */,
@@ -3389,17 +3393,14 @@
 					"third-party/arc4/src",
 					"third-party/dht",
 					"third-party/libb64/include",
-					"third-party/libevent/include",
 					"third-party/libutp",
 					"third-party/utfcpp/source",
-					"third-party/fmt/include",
 					"third-party/libdeflate",
 					"third-party/libpsl/include",
 				);
 				OTHER_CFLAGS = (
 					"$(inherited)",
 					"-DWITH_UTP",
-					"-DFMT_HEADER_ONLY",
 					"-D__TRANSMISSION__",
 					"-DHAVE_FLOCK",
 					"-DHAVE_STRLCPY",
@@ -3408,7 +3409,9 @@
 					"-DHAVE_ZLIB",
 					"-DHAVE_ICONV",
 				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				PRODUCT_NAME = transmission;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 				USER_HEADER_SEARCH_PATHS = "$(inherited) third-party/libnatpmp third-party/miniupnpc";
 			};
 			name = Debug;
@@ -3428,8 +3431,11 @@
 					.,
 				);
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = Transmission;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include";
 				WRAPPER_EXTENSION = app;
 			};
 			name = Debug;
@@ -3443,10 +3449,12 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
 				);
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = transmissioncli;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = Debug;
 		};
@@ -3459,16 +3467,15 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
-					"third-party/fmt/include",
 				);
 				OTHER_CFLAGS = (
 					"$(inherited)",
-					"-DFMT_HEADER_ONLY",
 					"-DHAVE_DAEMON",
 				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = "transmission-daemon";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = Debug;
 		};
@@ -3481,15 +3488,12 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
-					"third-party/fmt/include",
 				);
-				OTHER_CFLAGS = (
-					"$(inherited)",
-					"-DFMT_HEADER_ONLY",
-				);
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = "transmission-remote";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = Debug;
 		};
@@ -3549,6 +3553,11 @@
 				INFOPLIST_PREPROCESS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.10;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-DFMT_HEADER_ONLY",
+				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				SDKROOT = macosx;
 				STRIP_INSTALLED_PRODUCT = NO;
 			};
@@ -3592,17 +3601,14 @@
 					"third-party/arc4/src",
 					"third-party/dht",
 					"third-party/libb64/include",
-					"third-party/libevent/include",
 					"third-party/libutp",
 					"third-party/utfcpp/source",
-					"third-party/fmt/include",
 					"third-party/libdeflate",
 					"third-party/libpsl/include",
 				);
 				OTHER_CFLAGS = (
 					"$(inherited)",
 					"-DWITH_UTP",
-					"-DFMT_HEADER_ONLY",
 					"-D__TRANSMISSION__",
 					"-DHAVE_FLOCK",
 					"-DHAVE_STRLCPY",
@@ -3611,7 +3617,9 @@
 					"-DHAVE_ZLIB",
 					"-DHAVE_ICONV",
 				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				PRODUCT_NAME = transmission;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 				USER_HEADER_SEARCH_PATHS = "$(inherited) third-party/libnatpmp third-party/miniupnpc";
 			};
 			name = Release;
@@ -3625,10 +3633,12 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
 				);
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = transmissioncli;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = Release;
 		};
@@ -3647,8 +3657,11 @@
 					.,
 				);
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = Transmission;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include";
 				WRAPPER_EXTENSION = app;
 			};
 			name = Release;
@@ -3707,7 +3720,12 @@
 				INFOPLIST_PREFIX_HEADER = libtransmission/version.h;
 				INFOPLIST_PREPROCESS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.10;
-				OTHER_CFLAGS = "-DNDEBUG";
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-DFMT_HEADER_ONLY",
+					"-DNDEBUG",
+				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				SDKROOT = macosx;
 			};
 			name = Release;
@@ -3716,6 +3734,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ENABLE_OBJC_ARC = NO;
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				PRODUCT_NAME = dht;
 			};
 			name = Debug;
@@ -3724,6 +3744,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ENABLE_OBJC_ARC = NO;
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				PRODUCT_NAME = dht;
 			};
 			name = "Release - Debug";
@@ -3732,6 +3754,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ENABLE_OBJC_ARC = NO;
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				PRODUCT_NAME = dht;
 			};
 			name = Release;
@@ -3792,6 +3816,11 @@
 				INFOPLIST_PREPROCESS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.10;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-DFMT_HEADER_ONLY",
+				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				SDKROOT = macosx;
 				STRIP_INSTALLED_PRODUCT = NO;
 			};
@@ -3812,8 +3841,11 @@
 					.,
 				);
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = Transmission;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include";
 				WRAPPER_EXTENSION = app;
 			};
 			name = "Release - Debug";
@@ -3827,10 +3859,12 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
 				);
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = transmissioncli;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = "Release - Debug";
 		};
@@ -3845,17 +3879,14 @@
 					"third-party/arc4/src",
 					"third-party/dht",
 					"third-party/libb64/include",
-					"third-party/libevent/include",
 					"third-party/libutp",
 					"third-party/utfcpp/source",
-					"third-party/fmt/include",
 					"third-party/libdeflate",
 					"third-party/libpsl/include",
 				);
 				OTHER_CFLAGS = (
 					"$(inherited)",
 					"-DWITH_UTP",
-					"-DFMT_HEADER_ONLY",
 					"-D__TRANSMISSION__",
 					"-DHAVE_FLOCK",
 					"-DHAVE_STRLCPY",
@@ -3864,7 +3895,9 @@
 					"-DHAVE_ZLIB",
 					"-DHAVE_ICONV",
 				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				PRODUCT_NAME = transmission;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 				USER_HEADER_SEARCH_PATHS = "$(inherited) third-party/libnatpmp third-party/miniupnpc";
 			};
 			name = "Release - Debug";
@@ -3878,16 +3911,15 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
-					"third-party/fmt/include",
 				);
 				OTHER_CFLAGS = (
 					"$(inherited)",
 					"-DHAVE_DAEMON",
-					"-DFMT_HEADER_ONLY",
 				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = "transmission-daemon";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = "Release - Debug";
 		};
@@ -3900,15 +3932,12 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
-					"third-party/fmt/include",
 				);
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				OTHER_LDFLAGS = "-lc++";
-				OTHER_CFLAGS = (
-					"$(inherited)",
-					"-DFMT_HEADER_ONLY",
-				);
 				PRODUCT_NAME = "transmission-remote";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = "Release - Debug";
 		};
@@ -3965,8 +3994,11 @@
 				);
 				INFOPLIST_FILE = "macosx/QuickLookPlugin/QuickLookPlugin-Info.plist";
 				INSTALL_PATH = /Library/QuickLook;
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include";
 				WRAPPER_EXTENSION = qlgenerator;
 			};
 			name = Debug;
@@ -3984,8 +4016,11 @@
 				);
 				INFOPLIST_FILE = "macosx/QuickLookPlugin/QuickLookPlugin-Info.plist";
 				INSTALL_PATH = /Library/QuickLook;
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include";
 				WRAPPER_EXTENSION = qlgenerator;
 			};
 			name = "Release - Debug";
@@ -4003,8 +4038,11 @@
 				);
 				INFOPLIST_FILE = "macosx/QuickLookPlugin/QuickLookPlugin-Info.plist";
 				INSTALL_PATH = /Library/QuickLook;
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include";
 				WRAPPER_EXTENSION = qlgenerator;
 			};
 			name = Release;
@@ -4052,16 +4090,15 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
-					"third-party/fmt/include",
 				);
 				OTHER_CFLAGS = (
 					"$(inherited)",
-					"-DFMT_HEADER_ONLY",
 					"-DHAVE_DAEMON",
 				);
+				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_NAME = "transmission-daemon";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = Release;
 		};
@@ -4074,15 +4111,12 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					.,
-					"third-party/libevent/include",
-					"third-party/fmt/include",
 				);
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
 				OTHER_LDFLAGS = "-lc++";
-				OTHER_CFLAGS = (
-					"$(inherited)",
-					"-DFMT_HEADER_ONLY",
-				);
 				PRODUCT_NAME = "transmission-remote";
+				SYSTEM_HEADER_SEARCH_PATHS = "$(inherited) third-party/fmt/include third-party/libevent/include";
 			};
 			name = Release;
 		};

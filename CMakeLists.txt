@@ -42,7 +42,7 @@ tr_auto_option(USE_SYSTEM_NATPMP    "Use system natpmp library" AUTO)
 tr_auto_option(USE_SYSTEM_UTP       "Use system utp library" AUTO)
 tr_auto_option(USE_SYSTEM_B64       "Use system b64 library" AUTO)
 tr_auto_option(USE_SYSTEM_PSL       "Use system psl library" AUTO)
-tr_auto_option(USE_QT_VERSION       "Use specific Qt version" AUTO 5 6)
+tr_list_option(USE_QT_VERSION       "Use specific Qt version" AUTO 5 6)
 tr_list_option(WITH_CRYPTO          "Use specified crypto library" AUTO openssl cyassl polarssl ccrypto)
 tr_auto_option(WITH_INOTIFY         "Enable inotify support (on systems that support it)" AUTO)
 tr_auto_option(WITH_KQUEUE          "Enable kqueue support (on systems that support it)" AUTO)
@@ -147,6 +147,9 @@ if(WIN32)
 endif()
 
 find_package(Fmt)
+add_definitions(-DFMT_HEADER_ONLY -DFMT_EXCEPTIONS=0)
+include_directories(SYSTEM ${LIBFMT_INCLUDE_DIRS})
+
 find_package(UtfCpp)
 find_package(Threads)
 find_package(PkgConfig QUIET)
@@ -342,8 +345,6 @@ tr_add_external_auto_library(NATPMP libnatpmp natpmp)
 if(NOT USE_SYSTEM_NATPMP)
     set(NATPMP_DEFINITIONS -DNATPMP_STATICLIB)
 endif()
-
-set(LIBFMT_DEFINITIONS -DFMT_HEADER_ONLY)
 
 tr_add_external_auto_library(MINIUPNPC miniupnpc miniupnpc
     CMAKE_ARGS
@@ -701,7 +702,6 @@ list(APPEND CPACK_SOURCE_IGNORE_FILES
     "[.]git"
     "node_modules"
 )
-set(CPACK_INSTALL_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/cmake/CPackSourceFixDirLinks.cmake")
 
 ## Code Formatting
 

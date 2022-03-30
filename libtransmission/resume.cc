@@ -140,13 +140,12 @@ static void saveGroup(tr_variant* dict, tr_torrent const* tor)
 
 static auto loadGroup(tr_variant* dict, tr_torrent* tor)
 {
-    std::string_view groupName;
-
-    if (tr_variantDictFindStrView(dict, TR_KEY_group, &groupName) && !groupName.empty())
+    if (std::string_view groupName; tr_variantDictFindStrView(dict, TR_KEY_group, &groupName) && !groupName.empty())
     {
         tor->setGroup(groupName);
         return tr_resume::Group;
     }
+
     return tr_resume::fields_t{};
 }
 
@@ -675,7 +674,7 @@ static auto loadFromFile(tr_torrent* tor, tr_resume::fields_t fieldsToLoad, bool
     auto buf = std::vector<char>{};
     tr_error* error = nullptr;
     auto top = tr_variant{};
-    if (!tr_loadFile(buf, filename, &error) ||
+    if (!tr_loadFile(filename, buf, &error) ||
         !tr_variantFromBuf(
             &top,
             TR_VARIANT_PARSE_BENC | TR_VARIANT_PARSE_INPLACE,
@@ -943,7 +942,7 @@ void save(tr_torrent* tor)
     tr_variantDictAddBool(&top, TR_KEY_paused, !tor->isRunning && !tor->isQueued());
     savePeers(&top, tor);
 
-    if (tor->hasMetadata())
+    if (tor->hasMetainfo())
     {
         saveFilePriorities(&top, tor);
         saveDND(&top, tor);
@@ -958,7 +957,8 @@ void save(tr_torrent* tor)
     saveLabels(&top, tor);
     saveGroup(&top, tor);
 
-    if (auto const err = tr_variantToFile(&top, TR_VARIANT_FMT_BENC, tor->resumeFile()); err != 0)
+    auto const resume_file = tor->resumeFile();
+    if (auto const err = tr_variantToFile(&top, TR_VARIANT_FMT_BENC, resume_file); err != 0)
     {
         tor->setLocalError(tr_strvJoin("Unable to save resume file: ", tr_strerror(err)));
     }
