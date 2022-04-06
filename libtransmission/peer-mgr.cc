@@ -16,7 +16,7 @@
 
 #include <event2/event.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #define LIBTRANSMISSION_PEER_MODULE
 #include "transmission.h"
@@ -128,26 +128,6 @@ struct peer_atom
     time_t shelf_date;
     tr_peer* peer; /* will be nullptr if not connected */
     tr_address addr;
-
-    [[nodiscard]] int compare(peer_atom const& that) const
-    {
-        return addr.compare(that.addr);
-    }
-
-    [[nodiscard]] bool operator==(peer_atom const& that) const
-    {
-        return compare(that) == 0;
-    }
-
-    [[nodiscard]] bool operator<(peer_atom const& that) const
-    {
-        return compare(that) < 0;
-    }
-
-    [[nodiscard]] bool operator>(peer_atom const& that) const
-    {
-        return compare(that) > 0;
-    }
 };
 
 #ifndef TR_ENABLE_ASSERTS
@@ -863,7 +843,7 @@ static void peerCallbackFunc(tr_peer* peer, tr_peer_event const* e, void* vs)
         break;
 
     default:
-        TR_ASSERT_MSG(false, "%s", fmt::format("unhandled peer event type {}", e->eventType).c_str());
+        TR_ASSERT_MSG(false, fmt::format(FMT_STRING("unhandled peer event type {:d}"), e->eventType));
     }
 }
 
@@ -2131,7 +2111,7 @@ static void rechokeUploads(tr_swarm* s, uint64_t const now)
     for (int i = 0; i < peerCount; ++i)
     {
         auto* const peer = peers[i];
-        struct peer_atom* const atom = peer->atom;
+        peer_atom const* const atom = peer->atom;
 
         if (tr_peerIsSeed(peer))
         {
@@ -2383,7 +2363,7 @@ static void removePeer(tr_peer* peer)
 static void closePeer(tr_peer* peer)
 {
     TR_ASSERT(peer != nullptr);
-    auto* const s = peer->swarm;
+    auto const* const s = peer->swarm;
 
     /* if we transferred piece data, then they might be good peers,
        so reset their `numFails' weight to zero. otherwise we connected

@@ -36,7 +36,7 @@
 #include <event2/buffer.h>
 #include <event2/event.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include "transmission.h"
 
@@ -419,22 +419,6 @@ std::string evbuffer_free_to_str(evbuffer* buf)
     return ret;
 }
 
-static char* evbuffer_free_to_str(struct evbuffer* buf, size_t* result_len)
-{
-    size_t const n = evbuffer_get_length(buf);
-    auto* const ret = tr_new(char, n + 1);
-    evbuffer_copyout(buf, ret, n);
-    evbuffer_free(buf);
-    ret[n] = '\0';
-
-    if (result_len != nullptr)
-    {
-        *result_len = n;
-    }
-
-    return ret;
-}
-
 char* tr_strvDup(std::string_view in)
 {
     auto const n = std::size(in);
@@ -442,12 +426,6 @@ char* tr_strvDup(std::string_view in)
     std::copy(std::begin(in), std::end(in), ret);
     ret[n] = '\0';
     return ret;
-}
-
-char* tr_strndup(void const* vin, size_t len)
-{
-    auto const* const in = static_cast<char const*>(vin);
-    return in == nullptr ? nullptr : tr_strvDup({ in, len });
 }
 
 char* tr_strdup(void const* in)
@@ -466,18 +444,6 @@ bool tr_wildmat(char const* text, char const* p)
     return (p[0] == '*' && p[1] == '\0') || (DoMatch(text, p) != 0);
 }
 
-char* tr_strdup_printf(char const* fmt, ...)
-{
-    evbuffer* const buf = evbuffer_new();
-
-    va_list ap;
-    va_start(ap, fmt);
-    evbuffer_add_vprintf(buf, fmt, ap);
-    va_end(ap);
-
-    return evbuffer_free_to_str(buf, nullptr);
-}
-
 char const* tr_strerror(int i)
 {
     char const* ret = strerror(i);
@@ -488,26 +454,6 @@ char const* tr_strerror(int i)
     }
 
     return ret;
-}
-
-int tr_strcmp0(char const* str1, char const* str2)
-{
-    if (str1 != nullptr && str2 != nullptr)
-    {
-        return strcmp(str1, str2);
-    }
-
-    if (str1 != nullptr)
-    {
-        return 1;
-    }
-
-    if (str2 != nullptr)
-    {
-        return -1;
-    }
-
-    return 0;
 }
 
 /****
@@ -582,16 +528,6 @@ void tr_wait_msec(long int msec)
 /***
 ****
 ***/
-
-int tr_snprintf(void* buf, size_t buflen, char const* fmt, ...)
-{
-    va_list args;
-
-    va_start(args, fmt);
-    int len = evutil_vsnprintf(static_cast<char*>(buf), buflen, fmt, args);
-    va_end(args);
-    return len;
-}
 
 /*
  * Copy src to string dst of size siz. At most siz-1 characters
@@ -750,7 +686,7 @@ static char* to_utf8(std::string_view sv)
         iconv_close(cd);
         if (rv != size_t(-1))
         {
-            char* const ret = tr_strndup(out, buflen - outbytesleft);
+            char* const ret = tr_strvDup({ out, buflen - outbytesleft });
             tr_free(out);
             return ret;
         }
@@ -899,7 +835,7 @@ char* tr_win32_format_message(uint32_t code)
 
     if (wide_size == 0)
     {
-        return tr_strdup_printf("Unknown error (0x%08x)", code);
+        return tr_strvDup(fmt::format(FMT_STRING("Unknown error ({:#08x})"), code));
     }
 
     if (wide_size != 0 && wide_text != nullptr)
@@ -1057,42 +993,31 @@ std::vector<int> tr_parseNumberRange(std::string_view str)
 
 double tr_truncd(double x, int precision)
 {
-    char buf[128];
-    tr_snprintf(buf, sizeof(buf), "%.*f", TR_ARG_TUPLE(DBL_DIG, x));
+    auto buf = std::array<char, 128>{};
+    auto const [out, len] = fmt::format_to_n(std::data(buf), std::size(buf) - 1, "{:.{}f}", x, DBL_DIG);
+    *out = '\0';
 
-    if (auto* const pt = strstr(buf, localeconv()->decimal_point); pt != nullptr)
+    if (auto* const pt = strstr(std::data(buf), localeconv()->decimal_point); pt != nullptr)
     {
         pt[precision != 0 ? precision + 1 : 0] = '\0';
     }
 
-    return atof(buf);
-}
-
-/* return a truncated double as a string */
-static char* tr_strtruncd(char* buf, double x, int precision, size_t buflen)
-{
-    tr_snprintf(buf, buflen, "%.*f", precision, tr_truncd(x, precision));
-    return buf;
+    return atof(std::data(buf));
 }
 
 std::string tr_strpercent(double x)
 {
-    auto buf = std::array<char, 64>{};
-
     if (x < 5.0)
     {
-        tr_strtruncd(std::data(buf), x, 2, std::size(buf));
-    }
-    else if (x < 100.0)
-    {
-        tr_strtruncd(std::data(buf), x, 1, std::size(buf));
-    }
-    else
-    {
-        tr_strtruncd(std::data(buf), x, 0, std::size(buf));
+        return fmt::format("{:.2f}", tr_truncd(x, 2));
     }
 
-    return std::data(buf);
+    if (x < 100.0)
+    {
+        return fmt::format("{:.1f}", tr_truncd(x, 1));
+    }
+
+    return fmt::format("{:.0f}", x);
 }
 
 std::string tr_strratio(double ratio, char const* infinity)
@@ -1157,18 +1082,14 @@ bool tr_moveFile(char const* oldpath, char const* newpath, tr_error** error)
         return false;
     }
 
+    if (tr_error* my_error = nullptr; !tr_sys_path_remove(oldpath, &my_error))
     {
-        tr_error* my_error = nullptr;
-
-        if (!tr_sys_path_remove(oldpath, &my_error))
-        {
-            tr_logAddError(fmt::format(
-                _("Couldn't remove '{path}': {error} ({error_code})"),
-                fmt::arg("path", oldpath),
-                fmt::arg("error", my_error->message),
-                fmt::arg("error_code", my_error->code)));
-            tr_error_free(my_error);
-        }
+        tr_logAddError(fmt::format(
+            _("Couldn't remove '{path}': {error} ({error_code})"),
+            fmt::arg("path", oldpath),
+            fmt::arg("error", my_error->message),
+            fmt::arg("error_code", my_error->code)));
+        tr_error_free(my_error);
     }
 
     return true;
@@ -1304,7 +1225,8 @@ static char* formatter_get_size_str(formatter_units const& u, char* buf, uint64_
         precision = 1;
     }
 
-    tr_snprintf(buf, buflen, "%.*f %s", TR_ARG_TUPLE(precision, value), units);
+    auto const [out, len] = fmt::format_to_n(buf, buflen - 1, "{:.{}f} {:s}", value, precision, units);
+    *out = '\0';
     return buf;
 }
 
@@ -1333,33 +1255,27 @@ void tr_formatter_speed_init(size_t kilo, char const* kb, char const* mb, char c
 
 std::string tr_formatter_speed_KBps(double KBps)
 {
-    auto buf = std::array<char, 64>{};
+    auto speed = KBps;
 
-    if (auto speed = KBps; speed <= 999.95) /* 0.0 KB to 999.9 KB */
+    if (speed <= 999.95) // 0.0 KB to 999.9 KB
     {
-        tr_snprintf(std::data(buf), std::size(buf), "%d %s", int(speed), std::data(speed_units[TR_FMT_KB].name));
-    }
-    else
-    {
-        double const K = speed_units[TR_FMT_KB].value;
-
-        speed /= K;
-
-        if (speed <= 99.995) /* 0.98 MB to 99.99 MB */
-        {
-            tr_snprintf(std::data(buf), std::size(buf), "%.2f %s", speed, std::data(speed_units[TR_FMT_MB].name));
-        }
-        else if (speed <= 999.95) /* 100.0 MB to 999.9 MB */
-        {
-            tr_snprintf(std::data(buf), std::size(buf), "%.1f %s", speed, std::data(speed_units[TR_FMT_MB].name));
-        }
-        else
-        {
-            tr_snprintf(std::data(buf), std::size(buf), "%.1f %s", speed / K, std::data(speed_units[TR_FMT_GB].name));
-        }
+        return fmt::format("{:d} {:s}", int(speed), std::data(speed_units[TR_FMT_KB].name));
     }
 
-    return std::data(buf);
+    double const K = speed_units[TR_FMT_KB].value;
+    speed /= K;
+
+    if (speed <= 99.995) // 0.98 MB to 99.99 MB
+    {
+        return fmt::format("{:.2f} {:s}", speed, std::data(speed_units[TR_FMT_MB].name));
+    }
+
+    if (speed <= 999.95) // 100.0 MB to 999.9 MB
+    {
+        return fmt::format("{:.1f} {:s}", speed, std::data(speed_units[TR_FMT_MB].name));
+    }
+
+    return fmt::format("{:.1f} {:s}", speed / K, std::data(speed_units[TR_FMT_GB].name));
 }
 
 static formatter_units mem_units;

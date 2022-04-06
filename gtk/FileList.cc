@@ -180,7 +180,7 @@ bool refreshFilesForeach(
             (*iter)[file_cols.enabled] = enabled;
             (*iter)[file_cols.have] = have;
             (*iter)[file_cols.prog] = prog;
-            (*iter)[file_cols.prog_str] = fmt::format("{}%", prog);
+            (*iter)[file_cols.prog_str] = fmt::format(FMT_STRING("{:d}%"), prog);
         }
     }
     else
@@ -236,7 +236,7 @@ bool refreshFilesForeach(
             (*iter)[file_cols.priority] = priority;
             (*iter)[file_cols.enabled] = enabled;
             (*iter)[file_cols.prog] = prog;
-            (*iter)[file_cols.prog_str] = fmt::format("{}%", prog);
+            (*iter)[file_cols.prog_str] = fmt::format(FMT_STRING("{:d}%"), prog);
         }
     }
 
@@ -421,7 +421,7 @@ using FileRowNode = Glib::NodeTree<row_struct>;
 
 void buildTree(FileRowNode& node, build_data& build)
 {
-    auto& child_data = node.data();
+    auto const& child_data = node.data();
     bool const isLeaf = node.child_count() == 0;
 
     auto const mime_type = isLeaf ? gtr_get_mime_type_from_filename(child_data.name) : DirectoryMimeType;
