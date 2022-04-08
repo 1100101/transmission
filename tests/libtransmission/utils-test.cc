@@ -33,27 +33,6 @@ using ::libtransmission::test::makeString;
 using UtilsTest = ::testing::Test;
 using namespace std::literals;
 
-TEST_F(UtilsTest, trStripPositionalArgs)
-{
-    auto const* in = "Hello %1$s foo %2$.*f";
-    auto const* expected = "Hello %s foo %.*f";
-    auto const* out = tr_strip_positional_args(in);
-    EXPECT_STREQ(expected, out);
-
-    in = "Hello %1$'d foo %2$'f";
-    expected = "Hello %d foo %f";
-    out = tr_strip_positional_args(in);
-    EXPECT_STREQ(expected, out);
-}
-
-TEST_F(UtilsTest, trStrvJoin)
-{
-    EXPECT_EQ(""sv, tr_strvJoin(""sv));
-    EXPECT_EQ("test"sv, tr_strvJoin("test"sv));
-    EXPECT_EQ("foo/bar"sv, tr_strvJoin("foo"sv, "/", std::string{ "bar" }));
-    EXPECT_EQ("abcde"sv, tr_strvJoin("a", "b", "c", "d", "e"));
-}
-
 TEST_F(UtilsTest, trStrvContains)
 {
     EXPECT_FALSE(tr_strvContains("a test is this"sv, "TEST"sv));
@@ -225,33 +204,6 @@ TEST_F(UtilsTest, trParseNumberRange)
 
     numbers = tr_parseNumberRange("Hello"sv);
     EXPECT_EQ(empty_string, tostring(numbers));
-}
-
-namespace
-{
-
-int compareInts(void const* va, void const* vb) noexcept
-{
-    auto const a = *static_cast<int const*>(va);
-    auto const b = *static_cast<int const*>(vb);
-    return a - b;
-}
-
-} // namespace
-
-TEST_F(UtilsTest, lowerbound)
-{
-    auto const a = std::array<int, 7>{ 1, 2, 3, 3, 3, 5, 8 };
-    auto const expected_pos = std::array<int, 10>{ 0, 1, 2, 5, 5, 6, 6, 6, 7, 7 };
-    auto const expected_exact = std::array<bool, 10>{ true, true, true, false, true, false, false, true, false, false };
-
-    for (int i = 1; i <= 10; i++)
-    {
-        bool exact;
-        auto const pos = tr_lowerBound(&i, a.data(), a.size(), sizeof(int), compareInts, &exact);
-        EXPECT_EQ(expected_pos[i - 1], pos);
-        EXPECT_EQ(expected_exact[i - 1], exact);
-    }
 }
 
 TEST_F(UtilsTest, trStrlower)

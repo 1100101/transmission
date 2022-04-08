@@ -5,7 +5,8 @@
 
 #include <algorithm>
 #include <array>
-#include <climits> /* INT_MAX */
+#include <cinttypes> // PRIu64
+#include <climits> // INT_MAX
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -174,7 +175,7 @@ struct tr_announcer
 
     void scheduleNextUpdate() const
     {
-        tr_timerAddMsec(this->upkeep_timer, UpkeepIntervalMsec);
+        tr_timerAddMsec(*this->upkeep_timer, UpkeepIntervalMsec);
     }
 
     std::set<tr_announce_request*, StopsCompare> stops;
