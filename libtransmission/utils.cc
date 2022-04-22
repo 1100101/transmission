@@ -367,16 +367,6 @@ tr_disk_space tr_dirSpace(std::string_view dir)
 *****
 ****/
 
-std::string evbuffer_free_to_str(evbuffer* buf)
-{
-    auto const n = evbuffer_get_length(buf);
-    auto ret = std::string{};
-    ret.resize(n);
-    evbuffer_copyout(buf, std::data(ret), n);
-    evbuffer_free(buf);
-    return ret;
-}
-
 char* tr_strvDup(std::string_view in)
 {
     auto const n = std::size(in);
@@ -1065,7 +1055,7 @@ uint64_t tr_htonll(uint64_t x)
 
 #else
 
-    /* fallback code by bdonlan at http://stackoverflow.com/questions/809902/64-bit-ntohl-in-c/875505#875505 */
+    /* fallback code by bdonlan at https://stackoverflow.com/questions/809902/64-bit-ntohl-in-c/875505#875505 */
     union
     {
         uint32_t lx[2];
@@ -1086,7 +1076,7 @@ uint64_t tr_ntohll(uint64_t x)
 
 #else
 
-    /* fallback code by bdonlan at http://stackoverflow.com/questions/809902/64-bit-ntohl-in-c/875505#875505 */
+    /* fallback code by bdonlan at https://stackoverflow.com/questions/809902/64-bit-ntohl-in-c/875505#875505 */
     union
     {
         uint32_t lx[2];

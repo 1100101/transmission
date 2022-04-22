@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib> /* qsort */
 #include <ctime> // time_t
+#include <tuple> // std::tie
 #include <iterator> // std::back_inserter
 #include <map>
 #include <vector>
@@ -166,7 +167,7 @@ public:
     std::map<tr_address, tr_handshake*> outgoing_handshakes;
     tr_ptrArray pool = {}; /* struct peer_atom */
     tr_ptrArray peers = {}; /* tr_peerMsgs */
-    tr_ptrArray webseeds = {}; /* tr_webseed */
+    std::vector<std::unique_ptr<tr_peer>> webseeds;
 
     tr_peerMgr* const manager;
     tr_torrent* const tor;
@@ -311,7 +312,6 @@ static void swarmFree(tr_swarm* s)
     TR_ASSERT(std::empty(s->outgoing_handshakes));
     TR_ASSERT(tr_ptrArrayEmpty(&s->peers));
 
-    tr_ptrArrayDestruct(&s->webseeds, [](void* peer) { delete static_cast<tr_peer*>(peer); });
     tr_ptrArrayDestruct(&s->pool, (PtrArrayForeachFunc)tr_free);
     tr_ptrArrayDestruct(&s->peers, nullptr);
     s->stats = {};
@@ -323,17 +323,17 @@ static void peerCallbackFunc(tr_peer* /*peer*/, tr_peer_event const* /*e*/, void
 
 static void rebuildWebseedArray(tr_swarm* s, tr_torrent* tor)
 {
-    /* clear the array */
-    tr_ptrArrayDestruct(&s->webseeds, [](void* peer) { delete static_cast<tr_peer*>(peer); });
-    s->webseeds = {};
-    s->stats.activeWebseedCount = 0;
+    size_t const n = tor->webseedCount();
 
-    /* repopulate it */
-    for (size_t i = 0, n = tor->webseedCount(); i < n; ++i)
+    s->webseeds.clear();
+    s->webseeds.reserve(n);
+    for (size_t i = 0; i < n; ++i)
     {
-        auto* const w = tr_webseedNew(tor, tor->webseed(i), peerCallbackFunc, s);
-        tr_ptrArrayAppend(&s->webseeds, w);
+        s->webseeds.emplace_back(tr_webseedNew(tor, tor->webseed(i), peerCallbackFunc, s));
     }
+    s->webseeds.shrink_to_fit();
+
+    s->stats.activeWebseedCount = 0;
 }
 
 static tr_swarm* swarmNew(tr_peerMgr* manager, tr_torrent* tor)
@@ -486,22 +486,17 @@ void tr_peerMgrSetUtpFailed(tr_torrent* tor, tr_address const* addr, bool failed
 
 static int countActiveWebseeds(tr_swarm* s)
 {
-    int activeCount = 0;
-
-    if (s->tor->isRunning && !s->tor->isDone())
+    if (!s->tor->isRunning || s->tor->isDone())
     {
-        uint64_t const now = tr_time_msec();
-
-        for (int i = 0, n = tr_ptrArraySize(&s->webseeds); i < n; ++i)
-        {
-            if (static_cast<tr_peer const*>(tr_ptrArrayNth(&s->webseeds, i))->is_transferring_pieces(now, TR_DOWN, nullptr))
-            {
-                ++activeCount;
-            }
-        }
+        return 0;
     }
 
-    return activeCount;
+    uint64_t const now = tr_time_msec();
+
+    return std::count_if(
+        std::begin(s->webseeds),
+        std::end(s->webseeds),
+        [&now](auto const& webseed) { return webseed->is_transferring_pieces(now, TR_DOWN, nullptr); });
 }
 
 // TODO: if we keep this, add equivalent API to ActiveRequest
@@ -1128,16 +1123,13 @@ size_t tr_peerMgrAddPex(tr_torrent* tor, uint8_t from, tr_pex const* pex, size_t
 std::vector<tr_pex> tr_peerMgrCompactToPex(void const* compact, size_t compactLen, uint8_t const* added_f, size_t added_f_len)
 {
     size_t n = compactLen / 6;
-    auto const* walk = static_cast<std::byte const*>(compact);
+    auto const* walk = static_cast<uint8_t const*>(compact);
     auto pex = std::vector<tr_pex>(n);
 
     for (size_t i = 0; i < n; ++i)
     {
-        pex[i].addr.type = TR_AF_INET;
-        std::copy_n(walk, 4, reinterpret_cast<std::byte*>(&pex[i].addr.addr));
-        walk += 4;
-        std::copy_n(walk, 2, reinterpret_cast<std::byte*>(&pex[i].port));
-        walk += 2;
+        std::tie(pex[i].addr, walk) = tr_address::fromCompact4(walk);
+        std::tie(pex[i].port, walk) = tr_port::fromCompact(walk);
 
         if (added_f != nullptr && n == added_f_len)
         {
@@ -1151,16 +1143,13 @@ std::vector<tr_pex> tr_peerMgrCompactToPex(void const* compact, size_t compactLe
 std::vector<tr_pex> tr_peerMgrCompact6ToPex(void const* compact, size_t compactLen, uint8_t const* added_f, size_t added_f_len)
 {
     size_t n = compactLen / 18;
-    auto const* walk = static_cast<std::byte const*>(compact);
+    auto const* walk = static_cast<uint8_t const*>(compact);
     auto pex = std::vector<tr_pex>(n);
 
     for (size_t i = 0; i < n; ++i)
     {
-        pex[i].addr.type = TR_AF_INET6;
-        std::copy_n(walk, 16, reinterpret_cast<std::byte*>(&pex[i].addr.addr.addr6.s6_addr));
-        walk += 16;
-        std::copy_n(walk, 2, reinterpret_cast<std::byte*>(&pex[i].port));
-        walk += 2;
+        std::tie(pex[i].addr, walk) = tr_address::fromCompact6(walk);
+        std::tie(pex[i].port, walk) = tr_port::fromCompact(walk);
 
         if (added_f != nullptr && n == added_f_len)
         {
@@ -1317,7 +1306,10 @@ int tr_peerMgrGetPeers(tr_torrent const* tor, tr_pex** setme_pex, uint8_t af, ui
         }
     }
 
-    qsort(atoms, atomCount, sizeof(struct peer_atom*), compareAtomsByUsefulness);
+    if (atoms != nullptr)
+    {
+        qsort(atoms, atomCount, sizeof(struct peer_atom*), compareAtomsByUsefulness);
+    }
 
     /**
     ***  add the first N of them into our return list
@@ -1344,7 +1336,10 @@ int tr_peerMgrGetPeers(tr_torrent const* tor, tr_pex** setme_pex, uint8_t af, ui
         }
     }
 
-    qsort(pex, count, sizeof(tr_pex), tr_pexCompare);
+    if (pex != nullptr)
+    {
+        qsort(pex, count, sizeof(tr_pex), tr_pexCompare);
+    }
 
     TR_ASSERT(walk - pex == count);
     *setme_pex = pex;
@@ -1494,7 +1489,7 @@ void tr_peerMgrOnTorrentGotMetainfo(tr_torrent* tor)
         tr_peerUpdateProgress(tor, peers[i]);
     }
 
-    /* update the bittorrent peers' willingnes... */
+    /* update the bittorrent peers' willingness... */
     for (int i = 0; i < peerCount; ++i)
     {
         auto* msgs = static_cast<tr_peerMsgs*>(peers[i]);
@@ -1640,10 +1635,10 @@ tr_webseed_view tr_peerMgrWebseed(tr_torrent const* tor, size_t i)
 {
     TR_ASSERT(tr_isTorrent(tor));
     TR_ASSERT(tor->swarm != nullptr);
-    size_t const n = tr_ptrArraySize(&tor->swarm->webseeds);
+    size_t const n = std::size(tor->swarm->webseeds);
     TR_ASSERT(i < n);
 
-    return i >= n ? tr_webseed_view{} : tr_webseedView(static_cast<tr_peer const*>(tr_ptrArrayNth(&tor->swarm->webseeds, i)));
+    return i >= n ? tr_webseed_view{} : tr_webseedView(tor->swarm->webseeds[i].get());
 }
 
 static auto getPeerStats(tr_peerMsgs const* peer, time_t now, uint64_t now_msec)
@@ -1653,7 +1648,7 @@ static auto getPeerStats(tr_peerMsgs const* peer, time_t now, uint64_t now_msec)
 
     tr_address_to_string_with_buf(&atom->addr, stats.addr, sizeof(stats.addr));
     stats.client = peer->client.c_str();
-    stats.port = ntohs(peer->atom->port);
+    stats.port = peer->atom->port.host();
     stats.from = atom->fromFirst;
     stats.progress = peer->progress;
     stats.isUTP = peer->is_utp_connection();
