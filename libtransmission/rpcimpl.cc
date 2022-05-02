@@ -9,6 +9,7 @@
 #include <ctime>
 #include <iterator>
 #include <numeric>
+#include <set>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -287,7 +288,7 @@ static char const* torrentStop(
 {
     for (auto* tor : getTorrents(session, args_in))
     {
-        if (tor->isRunning || tor->isQueued() || tor->verifyState != TR_VERIFY_NONE)
+        if (tor->isRunning || tor->isQueued() || tor->verifyState() != TR_VERIFY_NONE)
         {
             tor->isStopping = true;
             notify(session, TR_RPC_TORRENT_STOPPED, tor);
@@ -561,7 +562,7 @@ static void initField(tr_torrent const* const tor, tr_stat const* const st, tr_v
         break;
 
     case TR_KEY_group:
-        tr_variantInitStrView(initme, tor->group);
+        tr_variantInitStrView(initme, tor->bandwidthGroup().sv());
         break;
 
     case TR_KEY_hashString:
@@ -653,7 +654,7 @@ static void initField(tr_torrent const* const tor, tr_stat const* const st, tr_v
     case TR_KEY_peersFrom:
         {
             tr_variantInitDict(initme, 7);
-            int const* f = st->peersFrom;
+            auto const* f = st->peersFrom;
             tr_variantDictAddInt(initme, TR_KEY_fromCache, f[TR_PEER_FROM_RESUME]);
             tr_variantDictAddInt(initme, TR_KEY_fromDht, f[TR_PEER_FROM_DHT]);
             tr_variantDictAddInt(initme, TR_KEY_fromIncoming, f[TR_PEER_FROM_INCOMING]);
@@ -1161,7 +1162,7 @@ static char const* torrentSet(
 
         if (std::string_view group; tr_variantDictFindStrView(args_in, TR_KEY_group, &group))
         {
-            tor->setGroup(group);
+            tor->setBandwidthGroup(group);
         }
 
         if (errmsg == nullptr && tr_variantDictFindList(args_in, TR_KEY_labels, &tmp_variant))
@@ -2364,7 +2365,7 @@ static char const* sessionGet(tr_session* s, tr_variant* args_in, tr_variant* ar
         for (size_t i = 0; i < field_count; ++i)
         {
             auto field_name = std::string_view{};
-            if (tr_variantGetStrView(tr_variantListChild(fields, i), &field_name))
+            if (!tr_variantGetStrView(tr_variantListChild(fields, i), &field_name))
             {
                 continue;
             }

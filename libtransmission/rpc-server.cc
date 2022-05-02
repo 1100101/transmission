@@ -26,6 +26,7 @@
 #include <event2/listener.h>
 
 #include <fmt/core.h>
+#include <fmt/chrono.h>
 
 #include <libdeflate.h>
 
@@ -203,15 +204,10 @@ static void add_response(struct evhttp_request* req, tr_rpc_server* server, stru
     }
 }
 
-static void add_time_header(struct evkeyvalq* headers, char const* key, time_t value)
+static void add_time_header(struct evkeyvalq* headers, char const* key, time_t now)
 {
-    char buf[128];
-    struct tm tm;
-    /* According to RFC 2616 this must follow RFC 1123's date format,
-       so use gmtime instead of localtime... */
-    tr_gmtime_r(&value, &tm);
-    strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tm);
-    evhttp_add_header(headers, key, buf);
+    // RFC 2616 says this must follow RFC 1123's date format, so use gmtime instead of localtime
+    evhttp_add_header(headers, key, fmt::format("{:%a %b %d %T %Y%n}", fmt::gmtime(now)).c_str());
 }
 
 static void evbuffer_ref_cleanup_tr_free(void const* /*data*/, size_t /*datalen*/, void* extra)
@@ -1088,8 +1084,20 @@ tr_rpc_server::tr_rpc_server(tr_session* session_in, tr_variant* settings)
     }
 
     key = TR_KEY_rpc_socket_mode;
+    bool is_missing_rpc_socket_mode_key = true;
 
-    if (!tr_variantDictFindInt(settings, key, &i))
+    if (tr_variantDictFindStrView(settings, key, &sv))
+    {
+        /* Read the socket permission as a string representing an octal number. */
+        is_missing_rpc_socket_mode_key = false;
+        i = tr_parseNum<int>(sv, 8).value_or(tr_rpc_server::DefaultRpcSocketMode);
+    }
+    else if (tr_variantDictFindInt(settings, key, &i))
+    {
+        /* Or as a base 10 integer to remain compatible with the old settings format. */
+        is_missing_rpc_socket_mode_key = false;
+    }
+    if (is_missing_rpc_socket_mode_key)
     {
         missing_settings_key(key);
     }
