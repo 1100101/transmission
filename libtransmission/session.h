@@ -53,7 +53,7 @@ struct tr_address;
 struct tr_announcer;
 struct tr_announcer_udp;
 struct tr_bindsockets;
-struct tr_blocklistFile;
+struct BlocklistFile;
 struct tr_cache;
 struct tr_fdInfo;
 
@@ -279,6 +279,65 @@ public:
 
     //
 
+    using TorrentCallbackFunc = void (*)(tr_torrent*, void* user_data);
+
+    void setTorrentQueueStartedCallback(TorrentCallbackFunc cb, void* user_data)
+    {
+        queue_started_callback_ = std::make_pair(cb, user_data);
+    }
+
+    void torrentQueueStarted(tr_torrent* tor)
+    {
+        invoke(tor, queue_started_callback_);
+    }
+
+    void setTorrentMetadataCallback(TorrentCallbackFunc cb, void* user_data)
+    {
+        metadata_completed_callback_ = std::make_pair(cb, user_data);
+    }
+
+    void torrentMetadataCompleted(tr_torrent* tor)
+    {
+        invoke(tor, metadata_completed_callback_);
+    }
+
+    void setTorrentIdleLimitCallback(TorrentCallbackFunc cb, void* user_data)
+    {
+        idle_limit_callback_ = std::make_pair(cb, user_data);
+    }
+
+    void torrentIdleLimitReached(tr_torrent* tor)
+    {
+        invoke(tor, idle_limit_callback_);
+    }
+
+    void setTorrentRatioLimitCallback(TorrentCallbackFunc cb, void* user_data)
+    {
+        ratio_limit_callback_ = std::make_pair(cb, user_data);
+    }
+
+    void torrentRatioLimitReached(tr_torrent* tor)
+    {
+        invoke(tor, ratio_limit_callback_);
+    }
+
+    using CompletenessFunc = void (*)(tr_torrent*, tr_completeness, bool, void*);
+
+    void setTorrentCompletenessCallback(CompletenessFunc cb, void* user_data)
+    {
+        torrent_completeness_callback_ = std::make_pair(cb, user_data);
+    }
+
+    void torrentCompletenessChanged(tr_torrent* tor, tr_completeness completeness, bool was_running)
+    {
+        if (auto& [func, data] = torrent_completeness_callback_; func != nullptr)
+        {
+            func(tor, completeness, was_running, data);
+        }
+    }
+
+    ///
+
     [[nodiscard]] constexpr auto& openFiles() noexcept
     {
         return open_files_;
@@ -379,7 +438,7 @@ public:
     std::string resume_dir;
     std::string torrent_dir;
 
-    std::vector<tr_blocklistFile*> blocklists;
+    std::vector<std::unique_ptr<BlocklistFile>> blocklists;
     struct tr_peerMgr* peerMgr;
     struct tr_shared* shared;
 
@@ -444,6 +503,16 @@ public:
     int peer_socket_tos_ = *tr_netTosFromName(TR_DEFAULT_PEER_SOCKET_TOS_STR);
 
 private:
+    using TorrentCallback = std::pair<TorrentCallbackFunc, void*>;
+
+    void invoke(tr_torrent* tor, TorrentCallback& cb)
+    {
+        if (auto& [func, data] = cb; func != nullptr)
+        {
+            func(tor, data);
+        }
+    }
+
     static std::recursive_mutex session_mutex_;
 
     tr_torrents torrents_;
@@ -455,6 +524,12 @@ private:
     std::string incomplete_dir_;
     std::string peer_congestion_algorithm_;
     std::optional<tr_address> external_ip_;
+
+    TorrentCallback idle_limit_callback_ = {};
+    TorrentCallback metadata_completed_callback_ = {};
+    TorrentCallback queue_started_callback_ = {};
+    TorrentCallback ratio_limit_callback_ = {};
+    std::pair<CompletenessFunc, void*> torrent_completeness_callback_ = {};
 
     std::array<bool, TR_SCRIPT_N_TYPES> scripts_enabled_;
     bool blocklist_enabled_ = false;
