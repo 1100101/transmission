@@ -27,7 +27,6 @@
 #include "peer-io.h"
 #include "peer-mgr.h"
 #include "peer-msgs.h"
-#include "ptrarray.h"
 #include "quark.h"
 #include "session.h"
 #include "torrent-magnet.h"
@@ -370,6 +369,17 @@ public:
     [[nodiscard]] bool is_connection_older_than(time_t timestamp) const noexcept override
     {
         return io->time_created < timestamp;
+    }
+
+    [[nodiscard]] std::pair<tr_address, tr_port> socketAddress() const override
+    {
+        return io->socketAddress();
+    }
+
+    [[nodiscard]] std::string readable() const override
+    {
+        auto const [addr, port] = socketAddress();
+        return addr.readable(port);
     }
 
     void cancel_block_request(tr_block_index_t block) override
@@ -1756,7 +1766,7 @@ static ReadState readBtMessage(tr_peerMsgsImpl* msgs, struct evbuffer* inbuf, si
             if (auto const dht_port = tr_port::fromNetwork(nport); !std::empty(dht_port))
             {
                 msgs->dht_port = dht_port;
-                tr_dhtAddNode(msgs->session, tr_peerAddress(msgs), msgs->dht_port, false);
+                tr_dhtAddNode(msgs->session, &msgs->io->address(), msgs->dht_port, false);
             }
         }
         break;
