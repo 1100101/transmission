@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <iterator>
 #include <memory>
+#include <numeric> // std::accumulate()
 #include <set>
 #include <string>
 #include <string_view>
@@ -158,13 +159,9 @@ public:
         , base_url{ url }
         , callback{ callback_in }
         , callback_data{ callback_data_in }
-        , bandwidth(&tor->bandwidth_)
+        , bandwidth_(&tor->bandwidth_)
         , pulse_timer(evtimer_new(session->event_base, &tr_webseed::onTimer, this), event_free)
     {
-        // init parent bits
-        have.setHasAll();
-        tr_peerUpdateProgress(tor, this);
-
         startTimer();
     }
 
@@ -180,7 +177,7 @@ public:
         return tr_torrentFindFromId(session, torrent_id);
     }
 
-    [[nodiscard]] bool is_transferring_pieces(uint64_t now, tr_direction direction, unsigned int* setme_Bps) const override
+    [[nodiscard]] bool isTransferringPieces(uint64_t now, tr_direction direction, unsigned int* setme_Bps) const override
     {
         unsigned int Bps = 0;
         bool is_active = false;
@@ -188,7 +185,7 @@ public:
         if (direction == TR_DOWN)
         {
             is_active = !std::empty(tasks);
-            Bps = bandwidth.getPieceSpeedBytesPerSecond(now, direction);
+            Bps = bandwidth_.getPieceSpeedBytesPerSecond(now, direction);
         }
 
         if (setme_Bps != nullptr)
@@ -197,6 +194,26 @@ public:
         }
 
         return is_active;
+    }
+
+    [[nodiscard]] tr_bandwidth& bandwidth() noexcept override
+    {
+        return bandwidth_;
+    }
+
+    [[nodiscard]] size_t activeReqCount(tr_direction dir) const noexcept override
+    {
+        if (dir == TR_CLIENT_TO_PEER) // blocks we've requested
+        {
+            return std::accumulate(
+                std::begin(tasks),
+                std::end(tasks),
+                size_t{},
+                [](size_t sum, auto const* task) { return sum + (task->blocks.end - task->blocks.begin); });
+        }
+
+        // webseed will never request blocks from us
+        return {};
     }
 
     [[nodiscard]] std::string readable() const override
@@ -209,9 +226,14 @@ public:
         return base_url;
     }
 
+    [[nodiscard]] bool hasPiece(tr_piece_index_t /*piece*/) const noexcept override
+    {
+        return true;
+    }
+
     void gotPieceData(uint32_t n_bytes)
     {
-        bandwidth.notifyBandwidthConsumed(TR_DOWN, n_bytes, true, tr_time_msec());
+        bandwidth_.notifyBandwidthConsumed(TR_DOWN, n_bytes, true, tr_time_msec());
         publishClientGotPieceData(n_bytes);
         connection_limiter.gotData();
     }
@@ -248,7 +270,6 @@ public:
     tr_peer_callback const callback;
     void* const callback_data;
 
-    Bandwidth bandwidth;
     ConnectionLimiter connection_limiter;
     std::set<tr_webseed_task*> tasks;
 
@@ -281,6 +302,7 @@ private:
         webseed->startTimer();
     }
 
+    tr_bandwidth bandwidth_;
     std::shared_ptr<event> const pulse_timer;
     static int constexpr IdleTimerMsec = 2000;
 };
@@ -528,6 +550,6 @@ tr_webseed_view tr_webseedView(tr_peer const* peer)
     }
 
     auto bytes_per_second = unsigned{ 0 };
-    auto const is_downloading = peer->is_transferring_pieces(tr_time_msec(), TR_DOWN, &bytes_per_second);
+    auto const is_downloading = peer->isTransferringPieces(tr_time_msec(), TR_DOWN, &bytes_per_second);
     return { w->base_url.c_str(), is_downloading, bytes_per_second };
 }

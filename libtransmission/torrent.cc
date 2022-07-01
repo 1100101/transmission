@@ -111,6 +111,31 @@ tr_torrent* tr_torrentFindFromObfuscatedHash(tr_session* session, tr_sha1_digest
     return nullptr;
 }
 
+bool tr_torrentSetMetainfoFromFile(tr_torrent* tor, tr_torrent_metainfo* metainfo, char const* filename)
+{
+    if (tr_torrentHasMetadata(tor))
+    {
+        return false;
+    }
+
+    tr_error* error = nullptr;
+    tr_torrentUseMetainfoFromFile(tor, metainfo, filename, &error);
+
+    if (error != nullptr)
+    {
+        tor->setLocalError(fmt::format(
+            _("Couldn't use metaInfo from '{path}' for '{magnet}': {error} ({error_code})"),
+            fmt::arg("path", filename),
+            fmt::arg("magnet", tor->magnet()),
+            fmt::arg("error", error->message),
+            fmt::arg("error_code", error->code)));
+        tr_error_clear(&error);
+        return false;
+    }
+
+    return true;
+}
+
 bool tr_torrent::isPieceTransferAllowed(tr_direction direction) const
 {
     TR_ASSERT(tr_isDirection(direction));
@@ -831,8 +856,6 @@ static void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
                 fmt::arg("error_code", error->code)));
             tr_error_clear(&error);
         }
-
-        tr_error_clear(&error);
     }
 
     tor->torrent_announcer = tr_announcerAddTorrent(tor, onTrackerResponse, nullptr);
@@ -1039,7 +1062,7 @@ tr_stat const* tr_torrentStat(tr_torrent* tor)
 
     if (tor->swarm != nullptr)
     {
-        tr_swarmGetStats(tor->swarm, &swarm_stats);
+        swarm_stats = tr_swarmGetStats(tor->swarm);
     }
 
     tr_stat* const s = &tor->stats;

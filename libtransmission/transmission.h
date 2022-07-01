@@ -994,6 +994,13 @@ tr_torrent* tr_torrentFindFromMetainfo(tr_session*, tr_torrent_metainfo const*);
 tr_torrent* tr_torrentFindFromMagnetLink(tr_session* session, char const* link);
 
 /**
+ * @brief Set metainfo if possible.
+ * @return True if given metainfo was set.
+ *
+ */
+bool tr_torrentSetMetainfoFromFile(tr_torrent* torrent, tr_torrent_metainfo* metainfo, char const* filename);
+
+/**
  * @return this torrent's name.
  */
 char const* tr_torrentName(tr_torrent const*);
@@ -1284,10 +1291,10 @@ struct tr_peer_stat
     uint32_t cancelsToClient;
 
     /* how many requests the peer has made that we haven't responded to yet */
-    int pendingReqsToClient;
+    int activeReqsToClient;
 
     /* how many requests we've made and are currently awaiting a response for */
-    int pendingReqsToPeer;
+    int activeReqsToPeer;
 };
 
 tr_peer_stat* tr_torrentPeers(tr_torrent const* torrent, int* peerCount);
