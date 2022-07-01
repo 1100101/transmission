@@ -77,7 +77,6 @@ set(${PROJECT_NAME}_SOURCES
     InfoTrackersViewController.mm
     InfoWindowController.mm
     main.mm
-    MainWindow.mm
     MessageWindowController.mm
     NSApplicationAdditions.mm
     NSImageAdditions.mm
@@ -245,8 +244,8 @@ set(${PROJECT_NAME}_HIDPI_IMAGES
     CreateLarge
     DownArrowGroupTemplate
     DownArrowTemplate
+    EllipsisTemplate
     FavIcon
-    GearshapeTemplate
     Globe
     Groups
     InfoActivity

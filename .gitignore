@@ -25,3 +25,6 @@ third-party/miniupnp/miniupnpcstrings.h
 web/public_html/transmission-app.js.map
 .DS_Store
 web/public_html/transmission-app.js
+
+# CLion IDE build directory
+/cmake-build-*/

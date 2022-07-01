@@ -58,9 +58,6 @@
     [window setFrameUsingName:@"MessageWindowFrame"];
     window.restorationClass = [self class];
 
-    //disable fullscreen support
-    [window setCollectionBehavior:NSWindowCollectionBehaviorFullScreenNone];
-
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resizeColumn)
                                                name:NSTableViewColumnDidResizeNotification
                                              object:self.fMessageTable];
@@ -68,6 +65,9 @@
     [window setContentBorderThickness:NSMinY(self.fMessageTable.enclosingScrollView.frame) forEdge:NSMinYEdge];
 
     self.window.title = NSLocalizedString(@"Message Log", "Message window -> title");
+
+    //disable fullscreen support
+    [window setCollectionBehavior:NSWindowCollectionBehaviorFullScreenNone];
 
     //set images and text for popup button items
     [self.fLevelButton itemAtIndex:LEVEL_ERROR].title = NSLocalizedString(@"Error", "Message window -> level string");
@@ -206,14 +206,7 @@
         break;
 
     case TR_LOG_DEBUG:
-        if (@available(macOS 10.12, *))
-        {
-            color = NSColor.systemTealColor;
-        }
-        else
-        {
-            color = NSColor.cyanColor;
-        }
+        color = NSColor.systemTealColor;
         break;
 
     case TR_LOG_TRACE:
@@ -588,11 +581,17 @@
     case TR_LOG_ERROR:
         levelString = NSLocalizedString(@"Error", "Message window -> level");
         break;
+    case TR_LOG_WARN:
+        levelString = NSLocalizedString(@"Warn", "Message window -> level");
+        break;
     case TR_LOG_INFO:
         levelString = NSLocalizedString(@"Info", "Message window -> level");
         break;
     case TR_LOG_DEBUG:
         levelString = NSLocalizedString(@"Debug", "Message window -> level");
+        break;
+    case TR_LOG_TRACE:
+        levelString = NSLocalizedString(@"Trace", "Message window -> level");
         break;
     default:
         NSAssert1(NO, @"Unknown message log level: %ld", level);
