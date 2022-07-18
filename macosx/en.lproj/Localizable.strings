@@ -1126,7 +1126,7 @@
 
 /* Message window -> level
    Message window -> level string */
-"Warn" = "Warn";
+"Warning" = "Warning";
 
 /* Drag overlay -> url */
 "Web Address" = "Web Address";
@@ -1149,3 +1149,5 @@
 /* Inspector -> peer -> status */
 "You want to download, but peer does not want to send (interested and choked)" = "You want to download, but peer does not want to send (interested and choked)";
 
+/* Preferences window size*/
+"PrefWindowSize" = "606";

@@ -26,7 +26,7 @@
 "%ld minutes" = "%ld minutos";
 
 /* stats window -> times opened */
-"%llu times" = "";
+"%llu times" = "%llu vezes";
 
 /* Inspector -> Peers tab -> peers */
 "%lu cache" = "%lu cache";
@@ -1047,7 +1047,7 @@
 
 /* Message window -> level
    Message window -> level string */
-"Trace" = "";
+"Trace" = "Rasto";
 
 /* Filter Bar -> filter menu */
 "Tracker" = "Tracker";
@@ -1126,7 +1126,7 @@
 
 /* Message window -> level
    Message window -> level string */
-"Warn" = "";
+"Warning" = "Aviso";
 
 /* Drag overlay -> url */
 "Web Address" = "Endereço web";
@@ -1148,4 +1148,7 @@
 
 /* Inspector -> peer -> status */
 "You want to download, but peer does not want to send (interested and choked)" = "Pretende receber, mas o peer não quer enviar (interessado e congestionado)";
+
+/* Preferences window size*/
+"PrefWindowSize" = "655";
 

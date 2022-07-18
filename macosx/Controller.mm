@@ -868,47 +868,57 @@ static void removeKeRangerRansomware()
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender
 {
-    if (!self.fQuitRequested && [self.fDefaults boolForKey:@"CheckQuit"])
+    if (self.fQuitRequested || ![self.fDefaults boolForKey:@"CheckQuit"])
     {
-        NSUInteger active = 0, downloading = 0;
-        for (Torrent* torrent in self.fTorrents)
+        return NSTerminateNow;
+    }
+
+    NSUInteger active = 0, downloading = 0;
+    for (Torrent* torrent in self.fTorrents)
+    {
+        if (torrent.active && !torrent.stalled)
         {
-            if (torrent.active && !torrent.stalled)
+            active++;
+            if (!torrent.allDownloaded)
             {
-                active++;
-                if (!torrent.allDownloaded)
-                {
-                    downloading++;
-                }
+                downloading++;
             }
-        }
-
-        if ([self.fDefaults boolForKey:@"CheckQuitDownloading"] ? downloading > 0 : active > 0)
-        {
-            NSAlert* alert = [[NSAlert alloc] init];
-            alert.alertStyle = NSAlertStyleInformational;
-            alert.messageText = NSLocalizedString(@"Are you sure you want to quit?", "Confirm Quit panel -> title");
-            alert.informativeText = active == 1 ?
-                NSLocalizedString(
-                    @"There is an active transfer that will be paused on quit."
-                     " The transfer will automatically resume on the next launch.",
-                    "Confirm Quit panel -> message") :
-                [NSString stringWithFormat:NSLocalizedString(
-                                               @"There are %lu active transfers that will be paused on quit."
-                                                " The transfers will automatically resume on the next launch.",
-                                               "Confirm Quit panel -> message"),
-                                           active];
-            [alert addButtonWithTitle:NSLocalizedString(@"Quit", "Confirm Quit panel -> button")];
-            [alert addButtonWithTitle:NSLocalizedString(@"Cancel", "Confirm Quit panel -> button")];
-
-            [alert beginSheetModalForWindow:self.fWindow completionHandler:^(NSModalResponse returnCode) {
-                [NSApp replyToApplicationShouldTerminate:returnCode == NSAlertFirstButtonReturn];
-            }];
-            return NSTerminateLater;
         }
     }
 
-    return NSTerminateNow;
+    BOOL preventedByTransfer = [self.fDefaults boolForKey:@"CheckQuitDownloading"] ? downloading > 0 : active > 0;
+
+    if (!preventedByTransfer)
+    {
+        return NSTerminateNow;
+    }
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleInformational;
+    alert.messageText = NSLocalizedString(@"Are you sure you want to quit?", "Confirm Quit panel -> title");
+    alert.informativeText = active == 1 ?
+        NSLocalizedString(
+            @"There is an active transfer that will be paused on quit."
+             " The transfer will automatically resume on the next launch.",
+            "Confirm Quit panel -> message") :
+        [NSString stringWithFormat:NSLocalizedString(
+                                       @"There are %lu active transfers that will be paused on quit."
+                                        " The transfers will automatically resume on the next launch.",
+                                       "Confirm Quit panel -> message"),
+                                   active];
+    [alert addButtonWithTitle:NSLocalizedString(@"Quit", "Confirm Quit panel -> button")];
+    [alert addButtonWithTitle:NSLocalizedString(@"Cancel", "Confirm Quit panel -> button")];
+    alert.showsSuppressionButton = YES;
+
+    [alert beginSheetModalForWindow:self.fWindow completionHandler:^(NSModalResponse returnCode) {
+        if (alert.suppressionButton.state == NSControlStateValueOn)
+        {
+            [self.fDefaults setBool:NO forKey:@"CheckQuit"];
+        }
+        [NSApp replyToApplicationShouldTerminate:returnCode == NSAlertFirstButtonReturn];
+    }];
+
+    return NSTerminateLater;
 }
 
 - (void)applicationWillTerminate:(NSNotification*)notification
@@ -4002,9 +4012,16 @@ static void removeKeRangerRansomware()
 
     item.view = button;
 
-    NSSize const buttonSize = NSMakeSize(36.0, 25.0);
-    item.minSize = buttonSize;
-    item.maxSize = buttonSize;
+    if (@available(macOS 11.0, *))
+    {
+        //standard button sizes
+    }
+    else
+    {
+        NSSize const buttonSize = NSMakeSize(36.0, 25.0);
+        item.minSize = buttonSize;
+        item.maxSize = buttonSize;
+    }
 
     return item;
 }
@@ -4094,9 +4111,16 @@ static void removeKeRangerRansomware()
         segmentedControl.segmentCount = 2;
         segmentedCell.trackingMode = NSSegmentSwitchTrackingMomentary;
 
-        NSSize const groupSize = NSMakeSize(72.0, 25.0);
-        groupItem.minSize = groupSize;
-        groupItem.maxSize = groupSize;
+        if (@available(macOS 11.0, *))
+        {
+            //standard segment size
+        }
+        else
+        {
+            NSSize const groupSize = NSMakeSize(72.0, 25.0);
+            groupItem.minSize = groupSize;
+            groupItem.maxSize = groupSize;
+        }
 
         groupItem.label = NSLocalizedString(@"Apply All", "All toolbar item -> label");
         groupItem.paletteLabel = NSLocalizedString(@"Pause / Resume All", "All toolbar item -> palette label");
@@ -4138,9 +4162,16 @@ static void removeKeRangerRansomware()
         segmentedControl.segmentCount = 2;
         segmentedCell.trackingMode = NSSegmentSwitchTrackingMomentary;
 
-        NSSize const groupSize = NSMakeSize(72.0, 25.0);
-        groupItem.minSize = groupSize;
-        groupItem.maxSize = groupSize;
+        if (@available(macOS 11.0, *))
+        {
+            //standard segment size
+        }
+        else
+        {
+            NSSize const groupSize = NSMakeSize(72.0, 25.0);
+            groupItem.minSize = groupSize;
+            groupItem.maxSize = groupSize;
+        }
 
         groupItem.label = NSLocalizedString(@"Apply Selected", "Selected toolbar item -> label");
         groupItem.paletteLabel = NSLocalizedString(@"Pause / Resume Selected", "Selected toolbar item -> palette label");
@@ -5007,7 +5038,7 @@ static void removeKeRangerRansomware()
 - (void)updateWindowAfterToolbarChange
 {
     //Hacky way of fixing an issue with showing the Toolbar
-    if (!self.isFullScreen && [self.fDefaults boolForKey:@"AutoSize"])
+    if (!self.isFullScreen)
     {
         //macOS Big Sur shows the unified toolbar by default
         //and we only need to "fix" the layout when showing the toolbar
@@ -5027,7 +5058,7 @@ static void removeKeRangerRansomware()
         [self hideToolBarBezels:YES];
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self setWindowSizeToFit];
+            [self updateForAutoSize];
             [self hideToolBarBezels:NO];
         });
     }

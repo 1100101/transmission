@@ -153,6 +153,7 @@ find_package(Fmt)
 add_definitions(-DFMT_HEADER_ONLY -DFMT_EXCEPTIONS=0)
 include_directories(SYSTEM ${LIBFMT_INCLUDE_DIRS})
 
+find_package(WideInteger)
 find_package(FastFloat)
 find_package(UtfCpp)
 find_package(Threads)
@@ -362,7 +363,9 @@ tr_add_external_auto_library(DHT dht dht)
 tr_add_external_auto_library(PSL libpsl psl)
 
 if(ENABLE_UTP)
-    tr_add_external_auto_library(UTP libutp utp)
+    tr_add_external_auto_library(UTP libutp utp
+        CMAKE_ARGS
+            -DLIBUTP_BUILD_PROGRAMS=OFF)
 
     if(UTP_UPSTREAM_TARGET)
         # Use C++ linker for anything that depends on static libutp
@@ -679,7 +682,8 @@ if(ENABLE_DAEMON OR ENABLE_GTK OR ENABLE_QT)
 endif()
 
 if(INSTALL_DOC)
-    install(FILES AUTHORS COPYING NEWS.md README.md docs/rpc-spec.md extras/send-email-when-torrent-done.sh DESTINATION ${CMAKE_INSTALL_DOCDIR})
+    install(FILES AUTHORS COPYING README.md docs/rpc-spec.md extras/send-email-when-torrent-done.sh DESTINATION ${CMAKE_INSTALL_DOCDIR})
+    install(DIRECTORY news DESTINATION ${CMAKE_INSTALL_DOCDIR})
 endif()
 
 if(MSVC AND ENABLE_DAEMON AND ENABLE_QT AND ENABLE_UTILS AND WITH_CRYPTO STREQUAL "openssl")

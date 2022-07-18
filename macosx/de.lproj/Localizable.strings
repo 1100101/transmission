@@ -1126,7 +1126,7 @@
 
 /* Message window -> level
    Message window -> level string */
-"Warn" = "";
+"Warning" = "";
 
 /* Drag overlay -> url */
 "Web Address" = "Web-Adresse";
@@ -1148,4 +1148,7 @@
 
 /* Inspector -> peer -> status */
 "You want to download, but peer does not want to send (interested and choked)" = "Selbst interessiert am Empfangen; aber der Verbindungspartner möchte nichts senden (interessiert und blockiert).";
+
+/* Preferences window size*/
+"PrefWindowSize" = "748";
 
