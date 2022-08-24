@@ -8,6 +8,8 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
+#include <memory>
+
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -163,7 +165,7 @@ public:
         helper_.update(data, data_length);
     }
 
-    [[nodiscard]] tr_sha1_digest_t final() override
+    [[nodiscard]] tr_sha1_digest_t finish() override
     {
         return helper_.digest<tr_sha1_digest_t>();
     }
@@ -192,7 +194,7 @@ public:
         helper_.update(data, data_length);
     }
 
-    [[nodiscard]] tr_sha256_digest_t final() override
+    [[nodiscard]] tr_sha256_digest_t finish() override
     {
         return helper_.digest<tr_sha256_digest_t>();
     }

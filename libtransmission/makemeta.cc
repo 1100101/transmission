@@ -3,11 +3,14 @@
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
+#include <algorithm>
+#include <cerrno> // for ENOENT
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <fmt/format.h>
@@ -244,7 +247,7 @@ bool tr_metainfo_builder::blockingMakeChecksums(tr_error** error)
         TR_ASSERT(bufptr - std::data(buf) == (int)piece_size);
         TR_ASSERT(left_in_piece == 0);
         sha->add(std::data(buf), std::size(buf));
-        auto const digest = sha->final();
+        auto const digest = sha->finish();
         walk = std::copy(std::begin(digest), std::end(digest), walk);
         sha->clear();
 
@@ -390,6 +393,6 @@ std::string tr_metainfo_builder::benc(tr_error** error) const
     tr_variantDictAddInt(info_dict, TR_KEY_piece_length, pieceSize());
     tr_variantDictAddRaw(info_dict, TR_KEY_pieces, std::data(piece_hashes_), std::size(piece_hashes_));
     auto ret = tr_variantToStr(&top, TR_VARIANT_FMT_BENC);
-    tr_variantFree(&top);
+    tr_variantClear(&top);
     return ret;
 }

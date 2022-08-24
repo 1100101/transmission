@@ -11,6 +11,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <event2/buffer.h>
@@ -514,13 +515,13 @@ void onPartialDataFetched(tr_web::FetchResponse const& web_response)
 template<typename OutputIt>
 void makeUrl(tr_webseed* w, std::string_view name, OutputIt out)
 {
-    auto const url = w->base_url;
+    auto const& url = w->base_url;
 
     out = std::copy(std::begin(url), std::end(url), out);
 
     if (tr_strvEndsWith(url, "/"sv) && !std::empty(name))
     {
-        tr_http_escape(out, name, false);
+        tr_urlPercentEncode(out, name, false);
     }
 }
 

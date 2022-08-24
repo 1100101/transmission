@@ -24,7 +24,7 @@
 #include <libtransmission/transmission.h>
 
 #include <libtransmission/session-id.h>
-#include <libtransmission/utils.h> // tr_free
+#include <libtransmission/utils.h>
 #include <libtransmission/variant.h>
 
 #include "Session.h"
@@ -352,12 +352,12 @@ void Session::start()
         tr_variantInitDict(&settings, 0);
         tr_sessionLoadSettings(&settings, config_dir_.toUtf8().constData(), "qt");
         session_ = tr_sessionInit(config_dir_.toUtf8().constData(), true, &settings);
-        tr_variantFree(&settings);
+        tr_variantClear(&settings);
 
         rpc_.start(session_);
 
         auto* const ctor = tr_ctorNew(session_);
-        tr_free(tr_sessionLoadTorrents(session_, ctor, nullptr));
+        tr_sessionLoadTorrents(session_, ctor);
         tr_ctorFree(ctor);
     }
 

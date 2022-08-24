@@ -3,6 +3,7 @@
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
+#include <memory>
 #include <mutex>
 
 #if defined(POLARSSL_IS_MBEDTLS)
@@ -169,7 +170,7 @@ public:
         }
     }
 
-    [[nodiscard]] tr_sha1_digest_t final() override
+    [[nodiscard]] tr_sha1_digest_t finish() override
     {
         auto digest = tr_sha1_digest_t{};
         auto* const digest_as_uchar = reinterpret_cast<unsigned char*>(std::data(digest));
@@ -225,7 +226,7 @@ public:
         }
     }
 
-    [[nodiscard]] tr_sha256_digest_t final() override
+    [[nodiscard]] tr_sha256_digest_t finish() override
     {
         auto digest = tr_sha256_digest_t{};
         auto* const digest_as_uchar = reinterpret_cast<unsigned char*>(std::data(digest));

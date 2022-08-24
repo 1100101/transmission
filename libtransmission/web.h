@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 struct evbuffer;
 
@@ -118,8 +119,14 @@ public:
             return std::nullopt;
         }
 
-        // Return the preferred user public address string, or nullopt to not use one
-        [[nodiscard]] virtual std::optional<std::string> publicAddress() const
+        // Return IPv4 user public address string, or nullopt to not use one
+        [[nodiscard]] virtual std::optional<std::string> publicAddressV4() const
+        {
+            return std::nullopt;
+        }
+
+        // Return IPv6 user public address string, or nullopt to not use one
+        [[nodiscard]] virtual std::optional<std::string> publicAddressV6() const
         {
             return std::nullopt;
         }

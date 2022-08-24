@@ -4,6 +4,7 @@
 // License text can be found in the licenses/ folder.
 
 #include <algorithm>
+#include <array>
 #include <condition_variable>
 #include <list>
 #include <map>
@@ -11,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -56,14 +58,14 @@ static CURLcode ssl_context_func(CURL* /*curl*/, void* ssl_ctx, void* /*user_dat
         return CURLE_OK;
     }
 
-    static LPCWSTR const sys_store_names[] = {
+    static auto constexpr SysStoreNames = std::array<LPCWSTR, 2>{
         L"CA",
         L"ROOT",
     };
 
-    for (size_t i = 0; i < TR_N_ELEMENTS(sys_store_names); ++i)
+    for (auto& sys_store_name : SysStoreNames)
     {
-        HCERTSTORE const sys_cert_store = CertOpenSystemStoreW(0, sys_store_names[i]);
+        HCERTSTORE const sys_cert_store = CertOpenSystemStoreW(0, sys_store_name);
         if (sys_cert_store == nullptr)
         {
             continue;
@@ -174,7 +176,6 @@ public:
         queued_tasks_cv.notify_one();
     }
 
-private:
     class Task
     {
     private:
@@ -245,6 +246,25 @@ private:
                 return CURL_IPRESOLVE_V6;
             default:
                 return CURL_IPRESOLVE_WHATEVER;
+            }
+        }
+
+        [[nodiscard]] auto publicAddress() const
+        {
+            switch (options.ip_proto)
+            {
+            case FetchOptions::IPProtocol::V4:
+                return impl.mediator.publicAddressV4();
+            case FetchOptions::IPProtocol::V6:
+                return impl.mediator.publicAddressV6();
+            default:
+                auto ip = impl.mediator.publicAddressV4();
+                if (ip == std::nullopt)
+                {
+                    ip = impl.mediator.publicAddressV6();
+                }
+
+                return ip;
             }
         }
 
@@ -393,7 +413,7 @@ private:
         (void)curl_easy_setopt(e, CURLOPT_WRITEFUNCTION, onDataReceived);
         (void)curl_easy_setopt(e, CURLOPT_MAXREDIRS, MaxRedirects);
 
-        if (auto const addrstr = impl->mediator.publicAddress(); addrstr)
+        if (auto const addrstr = task->publicAddress(); addrstr)
         {
             (void)curl_easy_setopt(e, CURLOPT_INTERFACE, addrstr->c_str());
         }
@@ -542,7 +562,6 @@ private:
         impl->is_closed_ = true;
     }
 
-private:
     std::shared_ptr<CURLSH> const curlsh_{ curl_share_init(), curl_share_cleanup };
 
     std::mutex queued_tasks_mutex;

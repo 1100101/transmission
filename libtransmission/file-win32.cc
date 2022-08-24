@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype> // for isalpha()
+#include <iterator> // for std::back_inserter
 #include <string>
 #include <string_view>
 
@@ -42,9 +43,6 @@ struct tr_sys_dir_win32
 
 static auto constexpr NativeLocalPathPrefix = L"\\\\?\\"sv;
 static auto constexpr NativeUncPathPrefix = L"\\\\?\\UNC\\"sv;
-
-static wchar_t const native_local_path_prefix[] = { '\\', '\\', '?', '\\' };
-static wchar_t const native_unc_path_prefix[] = { '\\', '\\', '?', '\\', 'U', 'N', 'C', '\\' };
 
 static void set_system_error(tr_error** error, DWORD code)
 {

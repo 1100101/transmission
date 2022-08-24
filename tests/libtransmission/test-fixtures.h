@@ -71,13 +71,6 @@ static void depthFirstWalk(char const* path, file_func_t func)
     func(path);
 }
 
-inline std::string makeString(char*&& s)
-{
-    auto const ret = std::string(s != nullptr ? s : "");
-    tr_free(s);
-    return ret;
-}
-
 inline bool waitFor(std::function<bool()> const& test, int msec)
 {
     auto const deadline = std::chrono::milliseconds{ msec };
@@ -459,13 +452,7 @@ protected:
     {
         EXPECT_NE(nullptr, tor->session);
         tr_wait_msec(100);
-        EXPECT_TRUE(waitFor(
-            [tor]()
-            {
-                auto const activity = tr_torrentGetActivity(tor);
-                return activity != TR_STATUS_CHECK && activity != TR_STATUS_CHECK_WAIT && tor->checked_pieces_.hasAll();
-            },
-            4000));
+        EXPECT_TRUE(waitFor([tor]() { return tor->verifyState() == TR_VERIFY_NONE && tor->checked_pieces_.hasAll(); }, 4000));
     }
 
     void blockingTorrentVerify(tr_torrent* tor) const
@@ -486,7 +473,7 @@ protected:
             tr_variantInitDict(settings, 10);
             auto constexpr deleter = [](tr_variant* v)
             {
-                tr_variantFree(v);
+                tr_variantClear(v);
                 delete v;
             };
             settings_.reset(settings, deleter);

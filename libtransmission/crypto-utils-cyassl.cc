@@ -3,6 +3,7 @@
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
+#include <memory>
 #include <mutex>
 
 #if defined(CYASSL_IS_WOLFSSL)
@@ -140,7 +141,7 @@ public:
         }
     }
 
-    [[nodiscard]] tr_sha1_digest_t final() override
+    [[nodiscard]] tr_sha1_digest_t finish() override
     {
         auto digest = tr_sha1_digest_t{};
         API(ShaFinal)(&handle_, reinterpret_cast<byte*>(std::data(digest)));
@@ -175,7 +176,7 @@ public:
         }
     }
 
-    [[nodiscard]] tr_sha256_digest_t final() override
+    [[nodiscard]] tr_sha256_digest_t finish() override
     {
         auto digest = tr_sha256_digest_t{};
         API(Sha256Final)(&handle_, reinterpret_cast<byte*>(std::data(digest)));

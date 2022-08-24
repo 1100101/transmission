@@ -5,8 +5,8 @@
 
 #include <cerrno>
 #include <climits> /* NAME_MAX */
-
-#include <iostream> // NOCOMMIT
+#include <memory>
+#include <utility>
 
 #include <unistd.h> /* close() */
 
@@ -179,7 +179,6 @@ private:
         }
     }
 
-private:
     int infd_ = -1;
     int inwd_ = -1;
     struct bufferevent* event_ = nullptr;

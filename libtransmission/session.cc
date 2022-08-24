@@ -4,7 +4,6 @@
 // License text can be found in the licenses/ folder.
 
 #include <algorithm> // std::partial_sort(), std::min(), std::max()
-#include <cerrno> /* ENOENT */
 #include <climits> /* INT_MAX */
 #include <condition_variable>
 #include <csignal>
@@ -18,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -69,6 +69,9 @@ using namespace std::literals;
 
 std::recursive_mutex tr_session::session_mutex_;
 
+static auto constexpr DefaultBindAddressIpv4 = "0.0.0.0"sv;
+static auto constexpr DefaultBindAddressIpv6 = "::"sv;
+static auto constexpr DefaultRpcHostWhitelist = ""sv;
 #ifdef TR_LIGHTWEIGHT
 static auto constexpr DefaultCacheSizeMB = int{ 2 };
 static auto constexpr DefaultPrefetchEnabled = bool{ false };
@@ -142,15 +145,23 @@ std::optional<std::string_view> tr_session::WebMediator::userAgent() const
     return TR_NAME "/" SHORT_VERSION_STRING;
 }
 
-std::optional<std::string> tr_session::WebMediator::publicAddress() const
+std::optional<std::string> tr_session::WebMediator::publicAddressV4() const
 {
-    for (auto const type : { TR_AF_INET, TR_AF_INET6 })
+    auto const [addr, is_default_value] = session_->publicAddress(TR_AF_INET);
+    if (!is_default_value)
     {
-        auto const [addr, is_default_value] = session_->publicAddress(type);
-        if (!is_default_value)
-        {
-            return addr.readable();
-        }
+        return addr.readable();
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::string> tr_session::WebMediator::publicAddressV6() const
+{
+    auto const [addr, is_default_value] = session_->publicAddress(TR_AF_INET6);
+    if (!is_default_value)
+    {
+        return addr.readable();
     }
 
     return std::nullopt;
@@ -273,10 +284,10 @@ tr_session::PublicAddressResult tr_session::publicAddress(tr_address_type type) 
     switch (type)
     {
     case TR_AF_INET:
-        return { bind_ipv4.addr_, bind_ipv4.addr_.readable() == TR_DEFAULT_BIND_ADDRESS_IPV4 };
+        return { bind_ipv4.addr_, bind_ipv4.addr_.readable() == DefaultBindAddressIpv4 };
 
     case TR_AF_INET6:
-        return { bind_ipv6.addr_, bind_ipv6.addr_.readable() == TR_DEFAULT_BIND_ADDRESS_IPV6 };
+        return { bind_ipv6.addr_, bind_ipv6.addr_.readable() == DefaultBindAddressIpv6 };
 
     default:
         TR_ASSERT_MSG(false, "invalid type");
@@ -296,7 +307,7 @@ tr_session::PublicAddressResult tr_session::publicAddress(tr_address_type type) 
 
 void tr_sessionGetDefaultSettings(tr_variant* setme_dictionary)
 {
-    auto* const download_dir = tr_getDefaultDownloadDir();
+    auto const download_dir = tr_getDefaultDownloadDir();
 
     auto* const d = setme_dictionary;
     TR_ASSERT(tr_variantIsDict(d));
@@ -343,7 +354,7 @@ void tr_sessionGetDefaultSettings(tr_variant* setme_dictionary)
     tr_variantDictAddStrView(d, TR_KEY_rpc_username, "");
     tr_variantDictAddStrView(d, TR_KEY_rpc_whitelist, TR_DEFAULT_RPC_WHITELIST);
     tr_variantDictAddBool(d, TR_KEY_rpc_whitelist_enabled, true);
-    tr_variantDictAddStrView(d, TR_KEY_rpc_host_whitelist, TR_DEFAULT_RPC_HOST_WHITELIST);
+    tr_variantDictAddStrView(d, TR_KEY_rpc_host_whitelist, DefaultRpcHostWhitelist);
     tr_variantDictAddBool(d, TR_KEY_rpc_host_whitelist_enabled, true);
     tr_variantDictAddInt(d, TR_KEY_rpc_port, TR_DEFAULT_RPC_PORT);
     tr_variantDictAddStrView(d, TR_KEY_rpc_url, TR_DEFAULT_RPC_URL_STR);
@@ -368,16 +379,14 @@ void tr_sessionGetDefaultSettings(tr_variant* setme_dictionary)
     tr_variantDictAddBool(d, TR_KEY_speed_limit_up_enabled, false);
     tr_variantDictAddStr(d, TR_KEY_umask, fmt::format("{:03o}", DefaultUmask));
     tr_variantDictAddInt(d, TR_KEY_upload_slots_per_torrent, 8);
-    tr_variantDictAddStrView(d, TR_KEY_bind_address_ipv4, TR_DEFAULT_BIND_ADDRESS_IPV4);
-    tr_variantDictAddStrView(d, TR_KEY_bind_address_ipv6, TR_DEFAULT_BIND_ADDRESS_IPV6);
+    tr_variantDictAddStrView(d, TR_KEY_bind_address_ipv4, DefaultBindAddressIpv4);
+    tr_variantDictAddStrView(d, TR_KEY_bind_address_ipv6, DefaultBindAddressIpv6);
     tr_variantDictAddBool(d, TR_KEY_start_added_torrents, true);
     tr_variantDictAddBool(d, TR_KEY_trash_original_torrent_files, false);
     tr_variantDictAddInt(d, TR_KEY_anti_brute_force_threshold, 100);
     tr_variantDictAddBool(d, TR_KEY_anti_brute_force_enabled, true);
     tr_variantDictAddStrView(d, TR_KEY_announce_ip, "");
     tr_variantDictAddBool(d, TR_KEY_announce_ip_enabled, false);
-
-    tr_free(download_dir);
 }
 
 void tr_sessionGetSettings(tr_session const* s, tr_variant* setme_dictionary)
@@ -428,7 +437,7 @@ void tr_sessionGetSettings(tr_session const* s, tr_variant* setme_dictionary)
     tr_variantDictAddStr(d, TR_KEY_rpc_password, tr_sessionGetRPCPassword(s));
     tr_variantDictAddInt(d, TR_KEY_rpc_port, tr_sessionGetRPCPort(s));
     tr_variantDictAddStr(d, TR_KEY_rpc_socket_mode, fmt::format("{:#o}", s->rpc_server_->socket_mode_));
-    tr_variantDictAddStr(d, TR_KEY_rpc_url, tr_sessionGetRPCUrl(s));
+    tr_variantDictAddStr(d, TR_KEY_rpc_url, s->rpc_server_->url());
     tr_variantDictAddStr(d, TR_KEY_rpc_username, tr_sessionGetRPCUsername(s));
     tr_variantDictAddStr(d, TR_KEY_rpc_whitelist, tr_sessionGetRPCWhitelist(s));
     tr_variantDictAddBool(d, TR_KEY_rpc_whitelist_enabled, tr_sessionGetRPCWhitelistEnabled(s));
@@ -469,9 +478,8 @@ static void getSettingsFilename(tr_pathbuf& setme, char const* config_dir, char 
         return;
     }
 
-    auto* const default_config_dir = tr_getDefaultConfigDir(appname);
+    auto const default_config_dir = tr_getDefaultConfigDir(appname);
     setme.assign(std::string_view{ default_config_dir }, "/settings.json"sv);
-    tr_free(default_config_dir);
 }
 
 bool tr_sessionLoadSettings(tr_variant* dict, char const* config_dir, char const* appName)
@@ -484,7 +492,7 @@ bool tr_sessionLoadSettings(tr_variant* dict, char const* config_dir, char const
     tr_variantInitDict(dict, 0);
     tr_sessionGetDefaultSettings(dict);
     tr_variantMergeDicts(dict, &oldDict);
-    tr_variantFree(&oldDict);
+    tr_variantClear(&oldDict);
 
     /* file settings override the defaults */
     auto fileSettings = tr_variant{};
@@ -498,7 +506,7 @@ bool tr_sessionLoadSettings(tr_variant* dict, char const* config_dir, char const
     else if (tr_variantFromFile(&fileSettings, TR_VARIANT_PARSE_JSON, filename))
     {
         tr_variantMergeDicts(dict, &fileSettings);
-        tr_variantFree(&fileSettings);
+        tr_variantClear(&fileSettings);
         success = true;
     }
     else
@@ -523,7 +531,7 @@ void tr_sessionSaveSettings(tr_session* session, char const* config_dir, tr_vari
     if (auto file_settings = tr_variant{}; tr_variantFromFile(&file_settings, TR_VARIANT_PARSE_JSON, filename))
     {
         tr_variantMergeDicts(&settings, &file_settings);
-        tr_variantFree(&file_settings);
+        tr_variantClear(&file_settings);
     }
 
     /* the client's settings override the file settings */
@@ -535,14 +543,14 @@ void tr_sessionSaveSettings(tr_session* session, char const* config_dir, tr_vari
         tr_variantInitDict(&sessionSettings, 0);
         tr_sessionGetSettings(session, &sessionSettings);
         tr_variantMergeDicts(&settings, &sessionSettings);
-        tr_variantFree(&sessionSettings);
+        tr_variantClear(&sessionSettings);
     }
 
     /* save the result */
     tr_variantToFile(&settings, TR_VARIANT_FMT_JSON, filename);
 
     /* cleanup */
-    tr_variantFree(&settings);
+    tr_variantClear(&settings);
 
     /* Write bandwidth groups limits to file  */
     bandwidthGroupWrite(session, config_dir);
@@ -698,7 +706,7 @@ void tr_session::initImpl(init_data& data)
     tr_utpInit(this);
 
     /* cleanup */
-    tr_variantFree(&settings);
+    tr_variantClear(&settings);
     data.done_cv.notify_one();
 }
 
@@ -1894,8 +1902,6 @@ struct sessionLoadTorrentsData
 {
     tr_session* session;
     tr_ctor* ctor;
-    int* setmeCount;
-    tr_torrent** torrents;
     bool done;
 };
 
@@ -1938,41 +1944,41 @@ static void sessionLoadTorrents(struct sessionLoadTorrentsData* const data)
         tr_sys_dir_close(odir);
     }
 
-    int const n = std::size(torrents);
-    data->torrents = tr_new(tr_torrent*, n); // NOLINT(bugprone-sizeof-expression)
-    std::copy(std::begin(torrents), std::end(torrents), data->torrents);
-
-    if (n != 0)
+    if (auto const n = std::size(torrents); n != 0U)
     {
         tr_logAddInfo(fmt::format(ngettext("Loaded {count} torrent", "Loaded {count} torrents", n), fmt::arg("count", n)));
-    }
-
-    if (data->setmeCount != nullptr)
-    {
-        *data->setmeCount = n;
     }
 
     data->done = true;
 }
 
-tr_torrent** tr_sessionLoadTorrents(tr_session* session, tr_ctor* ctor, int* setmeCount)
+size_t tr_sessionLoadTorrents(tr_session* session, tr_ctor* ctor)
 {
     struct sessionLoadTorrentsData data;
 
     data.session = session;
     data.ctor = ctor;
-    data.setmeCount = setmeCount;
-    data.torrents = nullptr;
     data.done = false;
-
     tr_runInEventThread(session, sessionLoadTorrents, &data);
-
     while (!data.done)
     {
         tr_wait_msec(100);
     }
 
-    return data.torrents;
+    return std::size(session->torrents());
+}
+
+size_t tr_sessionGetAllTorrents(tr_session* session, tr_torrent** buf, size_t buflen)
+{
+    auto& torrents = session->torrents();
+    auto const n = std::size(torrents);
+
+    if (buflen >= n)
+    {
+        std::copy_n(std::begin(torrents), n, buf);
+    }
+
+    return n;
 }
 
 /***
@@ -2410,20 +2416,6 @@ uint16_t tr_sessionGetRPCPort(tr_session const* session)
     return session->rpc_server_ ? session->rpc_server_->port().host() : uint16_t{};
 }
 
-void tr_sessionSetRPCUrl(tr_session* session, char const* url)
-{
-    TR_ASSERT(session != nullptr);
-
-    session->rpc_server_->setUrl(url != nullptr ? url : "");
-}
-
-char const* tr_sessionGetRPCUrl(tr_session const* session)
-{
-    TR_ASSERT(session != nullptr);
-
-    return session->rpc_server_->url().c_str();
-}
-
 void tr_sessionSetRPCCallback(tr_session* session, tr_rpc_func func, void* user_data)
 {
     TR_ASSERT(session != nullptr);
@@ -2749,7 +2741,7 @@ static void bandwidthGroupRead(tr_session* session, std::string_view config_dir)
             group.honorParentLimits(TR_DOWN, honors);
         }
     }
-    tr_variantFree(&groups_dict);
+    tr_variantClear(&groups_dict);
 }
 
 static int bandwidthGroupWrite(tr_session const* session, std::string_view config_dir)
@@ -2774,7 +2766,7 @@ static int bandwidthGroupWrite(tr_session const* session, std::string_view confi
 
     auto const filename = tr_pathbuf{ config_dir, '/', BandwidthGroupsFilename };
     auto const ret = tr_variantToFile(&groups_dict, TR_VARIANT_FMT_JSON, filename);
-    tr_variantFree(&groups_dict);
+    tr_variantClear(&groups_dict);
     return ret;
 }
 

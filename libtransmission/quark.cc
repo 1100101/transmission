@@ -5,20 +5,20 @@
 
 #include <algorithm>
 #include <array>
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include "transmission.h"
 
 #include "quark.h"
-#include "utils.h" // tr_strvDup()
 
 using namespace std::literals;
 
 namespace
 {
 
-auto constexpr my_static = std::array<std::string_view, 394>{ ""sv,
+auto constexpr my_static = std::array<std::string_view, 398>{ ""sv,
                                                               "activeTorrentCount"sv,
                                                               "activity-date"sv,
                                                               "activityDate"sv,
@@ -277,6 +277,10 @@ auto constexpr my_static = std::array<std::string_view, 394>{ ""sv,
                                                               "recent-download-dir-2"sv,
                                                               "recent-download-dir-3"sv,
                                                               "recent-download-dir-4"sv,
+                                                              "recent-relocate-dir-1"sv,
+                                                              "recent-relocate-dir-2"sv,
+                                                              "recent-relocate-dir-3"sv,
+                                                              "recent-relocate-dir-4"sv,
                                                               "recheckProgress"sv,
                                                               "remote-session-enabled"sv,
                                                               "remote-session-host"sv,
@@ -464,7 +468,11 @@ tr_quark tr_quark_new(std::string_view str)
     }
 
     auto const ret = TR_N_KEYS + std::size(my_runtime);
-    my_runtime.emplace_back(tr_strvDup(str), std::size(str));
+    auto const len = std::size(str);
+    auto* perma = new char[len + 1];
+    std::copy_n(std::begin(str), len, perma);
+    perma[len] = '\0';
+    my_runtime.emplace_back(perma);
     return ret;
 }
 

@@ -5,10 +5,10 @@
 
 #include <algorithm>
 #include <array>
-#include <iterator>
 #include <list>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifdef __HAIKU__
@@ -110,38 +110,43 @@ static std::string xdgConfigHome()
     return fmt::format("{:s}/.config"sv, getHomeDir());
 }
 
-char* tr_getDefaultConfigDir(char const* appname)
+std::string tr_getDefaultConfigDir(std::string_view appname)
 {
-    if (auto dir = tr_env_get_string("TRANSMISSION_HOME"sv); !std::empty(dir))
+    if (std::empty(appname))
     {
-        return tr_strvDup(dir);
+        appname = "Transmission"sv;
     }
 
-    if (tr_str_is_empty(appname))
+    if (auto dir = tr_env_get_string("TRANSMISSION_HOME"sv); !std::empty(dir))
     {
-        appname = "Transmission";
+        return dir;
     }
 
 #ifdef __APPLE__
 
-    return tr_strvDup(fmt::format("{:s}/Library/Application Support/{:s}"sv, getHomeDir(), appname));
+    return fmt::format("{:s}/Library/Application Support/{:s}"sv, getHomeDir(), appname);
 
 #elif defined(_WIN32)
 
     auto const appdata = win32_get_known_folder(FOLDERID_LocalAppData);
-    return tr_strvDup(fmt::format("{:s}/{:s}"sv, appdata, appname));
+    return fmt::format("{:s}/{:s}"sv, appdata, appname);
 
 #elif defined(__HAIKU__)
 
     char buf[PATH_MAX];
     find_directory(B_USER_SETTINGS_DIRECTORY, -1, true, buf, sizeof(buf));
-    return tr_strvDup(fmt::format("{:s}/{:s}"sv, buf, appname);
+    return fmt::format("{:s}/{:s}"sv, buf, appname);
 
 #else
 
-    return tr_strvDup(fmt::format("{:s}/{:s}"sv, xdgConfigHome(), appname));
+    return fmt::format("{:s}/{:s}"sv, xdgConfigHome(), appname);
 
 #endif
+}
+
+size_t tr_getDefaultConfigDirToBuf(char const* appname, char* buf, size_t buflen)
+{
+    return tr_strvToBuf(tr_getDefaultConfigDir(appname != nullptr ? appname : ""), buf, buflen);
 }
 
 static std::string getXdgEntryFromUserDirs(std::string_view key)
@@ -178,25 +183,30 @@ static std::string getXdgEntryFromUserDirs(std::string_view key)
     return val;
 }
 
-char* tr_getDefaultDownloadDir()
+std::string tr_getDefaultDownloadDir()
 {
-    if (auto const dir = getXdgEntryFromUserDirs("XDG_DOWNLOAD_DIR"sv); !std::empty(dir))
+    if (auto dir = getXdgEntryFromUserDirs("XDG_DOWNLOAD_DIR"sv); !std::empty(dir))
     {
-        return tr_strvDup(dir);
+        return dir;
     }
 
 #ifdef _WIN32
     if (auto dir = win32_get_known_folder(FOLDERID_Downloads); !std::empty(dir))
     {
-        return tr_strvDup(dir);
+        return dir;
     }
 #endif
 
 #ifdef __HAIKU__
-    return tr_strvDup(fmt::format("{:s}/Desktop"sv, getHomeDir()));
+    return fmt::format("{:s}/Desktop"sv, getHomeDir());
 #endif
 
-    return tr_strvDup(fmt::format("{:s}/Downloads"sv, getHomeDir()));
+    return fmt::format("{:s}/Downloads"sv, getHomeDir());
+}
+
+size_t tr_getDefaultDownloadDirToBuf(char* buf, size_t buflen)
+{
+    return tr_strvToBuf(tr_getDefaultDownloadDir(), buf, buflen);
 }
 
 /***
@@ -268,9 +278,9 @@ std::string tr_getWebClientDir([[maybe_unused]] tr_session const* session)
     }
 
     /* check calling module place */
-    wchar_t wide_module_path[MAX_PATH];
-    GetModuleFileNameW(nullptr, wide_module_path, TR_N_ELEMENTS(wide_module_path));
-    auto const module_path = tr_win32_native_to_utf8(wide_module_path);
+    auto wide_module_path = std::array<wchar_t, MAX_PATH>{};
+    GetModuleFileNameW(nullptr, std::data(wide_module_path), std::size(wide_module_path));
+    auto const module_path = tr_win32_native_to_utf8({ std::data(wide_module_path) });
     if (auto const dir = tr_sys_path_dirname(module_path); !std::empty(dir))
     {
         if (auto const path = tr_pathbuf{ dir, "/Web"sv }; isWebClientDir(path))

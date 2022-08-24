@@ -5,10 +5,13 @@
 #include <algorithm>
 #include <cstdlib> // exit()
 #include <ctime>
+#include <iterator> // for std::back_inserter
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <locale.h>
@@ -456,7 +459,7 @@ bool Application::Impl::on_rpc_changed_idle(tr_rpc_callback_type type, tr_torren
                 core_->signal_prefs_changed().emit(changed_key);
             }
 
-            tr_variantFree(&tmp);
+            tr_variantClear(&tmp);
             break;
         }
 
@@ -559,12 +562,13 @@ void Application::Impl::on_startup()
 
     /* init the ui manager */
     ui_builder_ = Gtk::Builder::create_from_resource(gtr_get_full_resource_path("transmission-ui.xml"s));
-    auto const actions = gtr_actions_init(ui_builder_, this);
+    auto const actions_window = gtr_actions_init_window(ui_builder_, this);
+    auto const actions_torrent = gtr_actions_init_torrent(this);
 
     app_.set_menubar(gtr_action_get_object<Gio::Menu>("main-window-menu"));
 
     /* create main window now to be a parent to any error dialogs */
-    wind_ = MainWindow::create(app_, actions, core_);
+    wind_ = MainWindow::create(app_, actions_window, actions_torrent, core_);
     wind_->signal_size_allocate().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
     app_.hold();
     app_setup();
@@ -1325,7 +1329,7 @@ bool Application::Impl::call_rpc_for_selected_torrents(std::string const& method
         invoked = true;
     }
 
-    tr_variantFree(&top);
+    tr_variantClear(&top);
     return invoked;
 }
 
@@ -1350,7 +1354,7 @@ void Application::Impl::start_all_torrents()
     tr_variantInitDict(&request, 1);
     tr_variantDictAddStrView(&request, TR_KEY_method, "torrent-start"sv);
     tr_rpc_request_exec_json(session, &request, nullptr, nullptr);
-    tr_variantFree(&request);
+    tr_variantClear(&request);
 }
 
 void Application::Impl::pause_all_torrents()
@@ -1361,7 +1365,7 @@ void Application::Impl::pause_all_torrents()
     tr_variantInitDict(&request, 1);
     tr_variantDictAddStrView(&request, TR_KEY_method, "torrent-stop"sv);
     tr_rpc_request_exec_json(session, &request, nullptr, nullptr);
-    tr_variantFree(&request);
+    tr_variantClear(&request);
 }
 
 tr_torrent* Application::Impl::get_first_selected_torrent() const
@@ -1382,7 +1386,7 @@ tr_torrent* Application::Impl::get_first_selected_torrent() const
 
 void Application::Impl::copy_magnet_link_to_clipboard(tr_torrent* tor) const
 {
-    char* magnet = tr_torrentGetMagnetLink(tor);
+    auto const magnet = tr_torrentGetMagnetLink(tor);
     auto const display = wind_->get_display();
     GdkAtom selection;
     Glib::RefPtr<Gtk::Clipboard> clipboard;
@@ -1396,9 +1400,6 @@ void Application::Impl::copy_magnet_link_to_clipboard(tr_torrent* tor) const
     selection = GDK_SELECTION_PRIMARY;
     clipboard = Gtk::Clipboard::get_for_display(display, selection);
     clipboard->set_text(magnet);
-
-    /* cleanup */
-    tr_free(magnet);
 }
 
 void gtr_actions_handler(Glib::ustring const& action_name, gpointer user_data)
