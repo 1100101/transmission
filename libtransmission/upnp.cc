@@ -66,6 +66,12 @@ tr_port_forwarding portFwdState(UpnpState upnp_state, bool is_mapped)
 
 struct tr_upnp
 {
+    tr_upnp() = default;
+    tr_upnp(tr_upnp&&) = delete;
+    tr_upnp(tr_upnp const&) = delete;
+    tr_upnp& operator=(tr_upnp&&) = delete;
+    tr_upnp& operator=(tr_upnp const&) = delete;
+
     ~tr_upnp()
     {
         TR_ASSERT(!isMapped);
@@ -190,7 +196,7 @@ static int tr_upnpAddPortMapping(tr_upnp const* handle, char const* proto, tr_po
     auto const port_str = fmt::format(FMT_STRING("{:d}"), port.host());
 
 #if (MINIUPNPC_API_VERSION >= 8)
-    int err = UPNP_AddPortMapping(
+    int const err = UPNP_AddPortMapping(
         handle->urls.controlURL,
         handle->data.first.servicetype,
         port_str.c_str(),
@@ -201,7 +207,7 @@ static int tr_upnpAddPortMapping(tr_upnp const* handle, char const* proto, tr_po
         nullptr,
         nullptr);
 #else
-    int err = UPNP_AddPortMapping(
+    int const err = UPNP_AddPortMapping(
         handle->urls.controlURL,
         handle->data.first.servicetype,
         port_str.c_str(),
@@ -240,7 +246,7 @@ enum
     UPNP_IGD_INVALID = 3
 };
 
-static auto* discoverThreadfunc(std::string bindaddr)
+static auto* discoverThreadfunc(std::string bindaddr) // NOLINT performance-unnecessary-value-param
 {
     return tr_upnpDiscover(2000, bindaddr.c_str());
 }

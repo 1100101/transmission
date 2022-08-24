@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <climits> // SIZE_MAX
 #include <vector>
 
 #include "tr-popcount.h"
@@ -48,7 +49,7 @@ void setAllTrue(uint8_t* array, size_t bit_count)
            1 to replace -bitcount as linters warn about negating
            unsigned types. Any compiler will optimize ~x + 1 to -x in
            the backend. */
-        uint32_t shift = ((~bit_count) + 1) & 7U;
+        uint32_t const shift = ((~bit_count) + 1) & 7U;
         array[n - 1] = Val << shift;
     }
 }
@@ -132,7 +133,8 @@ size_t tr_bitfield::countFlags(size_t begin, size_t end) const noexcept
         for (size_t i = first_byte + 1; i < walk_end;)
         {
             tmp_accum += doPopcount(flags_[i]);
-            if ((i += 2) > walk_end)
+            i += 2;
+            if (i > walk_end)
             {
                 break;
             }

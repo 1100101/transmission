@@ -3,9 +3,8 @@
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
-#include <climits> /* USHRT_MAX */
+#include <algorithm> // std::copy_n()
 #include <cstdio> /* fprintf() */
-#include <cstring> /* strchr(), memcmp(), memcpy() */
 #include <iomanip>
 #include <iostream>
 #include <iterator>
@@ -45,9 +44,10 @@ using namespace std::literals;
 *****
 ****/
 
-static char const* get_event_string(tr_announce_request const* req)
+static std::string_view get_event_string(tr_announce_request const* req)
 {
-    return req->partial_seed && (req->event != TR_ANNOUNCE_EVENT_STOPPED) ? "paused" : tr_announce_event_get_string(req->event);
+    return req->partial_seed && (req->event != TR_ANNOUNCE_EVENT_STOPPED) ? "paused"sv :
+                                                                            tr_announce_event_get_string(req->event);
 }
 
 static tr_urlbuf announce_url_new(tr_session const* session, tr_announce_request const* req)
@@ -82,7 +82,7 @@ static tr_urlbuf announce_url_new(tr_session const* session, tr_announce_request
         fmt::arg("numwant", req->numwant),
         fmt::arg("key", req->key));
 
-    if (session->encryptionMode == TR_ENCRYPTION_REQUIRED)
+    if (session->encryptionMode() == TR_ENCRYPTION_REQUIRED)
     {
         fmt::format_to(out, "&requirecrypto=1");
     }
@@ -92,7 +92,7 @@ static tr_urlbuf announce_url_new(tr_session const* session, tr_announce_request
         fmt::format_to(out, "&corrupt={}", req->corrupt);
     }
 
-    if (char const* str = get_event_string(req); !tr_str_is_empty(str))
+    if (auto const str = get_event_string(req); !std::empty(str))
     {
         fmt::format_to(out, "&event={}", str);
     }
@@ -142,7 +142,7 @@ static void verboseLog(std::string_view description, tr_direction direction, std
 
     auto const direction_sv = direction == TR_DOWN ? "<< "sv : ">> "sv;
     out << description << std::endl << "[raw]"sv << direction_sv;
-    for (unsigned char ch : message)
+    for (unsigned char const ch : message)
     {
         if (isprint(ch) != 0)
         {
@@ -258,7 +258,10 @@ void tr_announcerParseHttpAnnounceResponse(tr_announce_response& response, std::
             }
             else if (key == "ip")
             {
-                tr_address_from_string(&pex_.addr, value);
+                if (auto const addr = tr_address::fromString(value); addr)
+                {
+                    pex_.addr = *addr;
+                }
             }
             else if (key == "peer id")
             {

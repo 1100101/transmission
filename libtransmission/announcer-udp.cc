@@ -3,8 +3,9 @@
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
-#include <cerrno> /* errno, EAFNOSUPPORT */
-#include <cstring> /* memset() */
+#include <algorithm> // for std::find_if()
+#include <cerrno> // for errno, EAFNOSUPPORT
+#include <cstring> // for memset()
 #include <ctime>
 #include <list>
 #include <memory>
@@ -32,6 +33,7 @@
 #include "tr-assert.h"
 #include "tr-udp.h"
 #include "utils.h"
+#include "web-utils.h"
 
 #define logwarn(interned, msg) tr_logAddWarn(msg, (interned).sv())
 #define logdbg(interned, msg) tr_logAddDebug(msg, (interned).sv())
@@ -89,15 +91,10 @@ static uint32_t announce_ip(tr_session const* session)
         return 0;
     }
 
-    tr_address ta;
     // Since size of IP field is only 4 bytes long we can announce
     // only IPv4 addresses.
-    if (!tr_address_from_string(&ta, session->announceIP()) || (ta.type != TR_AF_INET))
-    {
-        return 0;
-    }
-
-    return ta.addr.addr4.s_addr;
+    auto const addr = tr_address::fromString(session->announceIP());
+    return addr && addr->isIPv4() ? addr->addr.addr4.s_addr : 0;
 }
 
 /****
@@ -655,7 +652,7 @@ static void tau_tracker_upkeep_ex(struct tau_tracker* tracker, bool timeout_reqs
         hints.ai_protocol = IPPROTO_UDP;
         logtrace(tracker->host, "Trying a new DNS lookup");
         tracker->dns_request = evdns_getaddrinfo(
-            tracker->session->evdns_base,
+            tracker->session->evdnsBase(),
             tr_strlower(tracker->host.sv()).c_str(),
             nullptr,
             &hints,

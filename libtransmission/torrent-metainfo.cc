@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <numeric>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -456,10 +455,18 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         }
         else if (pathIs(InfoKey, PiecesKey))
         {
-            auto const n = std::size(value) / sizeof(tr_sha1_digest_t);
-            tm_.pieces_.resize(n);
-            std::copy_n(std::data(value), std::size(value), reinterpret_cast<char*>(std::data(tm_.pieces_)));
-            tm_.pieces_offset_ = context.tokenSpan().first;
+            if (std::size(value) % sizeof(tr_sha1_digest_t) == 0)
+            {
+                auto const n = std::size(value) / sizeof(tr_sha1_digest_t);
+                tm_.pieces_.resize(n);
+                std::copy_n(std::data(value), std::size(value), reinterpret_cast<char*>(std::data(tm_.pieces_)));
+                tm_.pieces_offset_ = context.tokenSpan().first;
+            }
+            else
+            {
+                tr_error_set(context.error, EINVAL, fmt::format("invalid piece size: {}", std::size(value)));
+                unhandled = true;
+            }
         }
         else if (pathStartsWith(PieceLayersKey))
         {
@@ -574,17 +581,12 @@ private:
         char const* const begin = &info_dict_begin_.front();
         char const* const end = &context.raw().back() + 1;
         auto const info_dict_benc = std::string_view{ begin, size_t(end - begin) };
-        auto const hash = tr_sha1(info_dict_benc);
-        auto const hash2 = tr_sha256(info_dict_benc);
-        if (!hash)
-        {
-            tr_error_set(context.error, EINVAL, "bad info_dict checksum");
-            return false;
-        }
+        auto const hash = tr_sha1::digest(info_dict_benc);
+        auto const hash2 = tr_sha256::digest(info_dict_benc);
 
-        tm_.info_hash_ = *hash;
+        tm_.info_hash_ = hash;
         tm_.info_hash_str_ = tr_sha1_to_string(tm_.info_hash_);
-        tm_.info_hash2_ = *hash2;
+        tm_.info_hash2_ = hash2;
         tm_.info_hash2_str_ = tr_sha256_to_string(tm_.info_hash2_);
         tm_.info_dict_size_ = std::size(info_dict_benc);
         return true;

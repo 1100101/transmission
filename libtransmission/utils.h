@@ -1,5 +1,5 @@
 // This file Copyright © 2009-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -19,12 +19,6 @@
 #include "platform-quota.h"
 #include "tr-macros.h"
 
-/***
-****
-***/
-
-struct event;
-struct timeval;
 struct tr_error;
 
 /**
@@ -72,12 +66,6 @@ struct tr_error;
  */
 [[nodiscard]] bool tr_wildmat(std::string_view text, std::string_view pattern);
 
-/**
- * @brief Loads a file and returns its contents.
- * On failure, NULL is returned and errno is set.
- */
-uint8_t* tr_loadFile(std::string_view filename, size_t* size, struct tr_error** error) TR_GNUC_MALLOC;
-
 bool tr_loadFile(std::string_view filename, std::vector<char>& contents, tr_error** error = nullptr);
 
 bool tr_saveFile(std::string_view filename, std::string_view contents, tr_error** error = nullptr);
@@ -92,22 +80,7 @@ constexpr auto tr_saveFile(std::string_view filename, ContiguousRange const& x, 
  * @brief Get disk capacity and free disk space (in bytes) for the specified folder.
  * @return struct with free and total as zero or positive integer on success, -1 in case of error.
  */
-tr_disk_space tr_dirSpace(std::string_view path);
-
-/**
- * @brief Convenience wrapper around timer_add() to have a timer wake up in a number of seconds and microseconds
- * @param timer         the timer to set
- * @param seconds       seconds to wait
- * @param microseconds  microseconds to wait
- */
-void tr_timerAdd(struct event& timer, int seconds, int microseconds);
-
-/**
- * @brief Convenience wrapper around timer_add() to have a timer wake up in a number of milliseconds
- * @param timer         the timer to set
- * @param milliseconds  milliseconds to wait
- */
-void tr_timerAddMsec(struct event& timer, int milliseconds);
+tr_disk_space tr_dirSpace(std::string_view directory);
 
 /** @brief return the current date in milliseconds */
 uint64_t tr_time_msec();
@@ -121,27 +94,13 @@ template<typename T, std::enable_if_t<std::is_integral<T>::value, bool> = true>
 template<typename T, std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
 [[nodiscard]] std::optional<T> tr_parseNum(std::string_view& sv);
 
-bool tr_utf8_validate(std::string_view sv, char const** endptr);
+bool tr_utf8_validate(std::string_view sv, char const** good_end);
 
 #ifdef _WIN32
 
-char* tr_win32_native_to_utf8(wchar_t const* text, int text_size);
-char* tr_win32_native_to_utf8_ex(
-    wchar_t const* text,
-    int text_size,
-    int extra_chars_before,
-    int extra_chars_after,
-    int* real_result_size);
-wchar_t* tr_win32_utf8_to_native(char const* text, int text_size);
-wchar_t* tr_win32_utf8_to_native_ex(
-    char const* text,
-    int text_size,
-    int extra_chars_before,
-    int extra_chars_after,
-    int* real_result_size);
-char* tr_win32_format_message(uint32_t code);
-
-void tr_win32_make_args_utf8(int* argc, char*** argv);
+std::string tr_win32_format_message(uint32_t code);
+std::string tr_win32_native_to_utf8(std::wstring_view);
+std::wstring tr_win32_utf8_to_native(std::string_view);
 
 int tr_main_win32(int argc, char** argv, int (*real_main)(int, char**));
 
@@ -175,14 +134,6 @@ void* tr_realloc(void* p, size_t size);
 /** @brief Portability wrapper around free() in which `nullptr' is a safe argument */
 void tr_free(void* p);
 
-/**
- * @brief make a newly-allocated copy of a chunk of memory
- * @param src the memory to copy
- * @param byteCount the number of bytes to copy
- * @return a newly-allocated copy of `src' that can be freed with tr_free()
- */
-[[nodiscard]] void* tr_memdup(void const* src, size_t byteCount);
-
 #define tr_new(struct_type, n_structs) (static_cast<struct_type*>(tr_malloc(sizeof(struct_type) * (size_t)(n_structs))))
 
 #define tr_new0(struct_type, n_structs) (static_cast<struct_type*>(tr_malloc0(sizeof(struct_type) * (size_t)(n_structs))))
@@ -209,9 +160,6 @@ size_t tr_strlcpy(void* dst, void const* src, size_t siz);
     @param errnum the error number to describe */
 [[nodiscard]] char const* tr_strerror(int errnum);
 
-/** @brief Returns true if the string ends with the specified case-insensitive suffix */
-[[nodiscard]] bool tr_str_has_suffix(char const* str, char const* suffix);
-
 template<typename T>
 [[nodiscard]] std::string tr_strlower(T in)
 {
@@ -232,27 +180,6 @@ template<typename T>
 ****  std::string_view utils
 ***/
 
-template<typename... T, typename std::enable_if_t<(std::is_convertible_v<T, std::string_view> && ...), bool> = true>
-[[nodiscard]] std::string tr_strvPath(T... args)
-{
-    auto setme = std::string{};
-    auto const n_args = sizeof...(args);
-    auto const n = n_args + (std::size(std::string_view{ args }) + ...);
-    if (setme.capacity() < n)
-    {
-        setme.reserve(n);
-    }
-
-    auto const foo = [&setme](std::string_view a)
-    {
-        setme += a;
-        setme += TR_PATH_DELIMITER;
-    };
-    (foo(args), ...);
-    setme.resize(setme.size() - 1);
-    return setme;
-}
-
 template<typename T>
 [[nodiscard]] constexpr bool tr_strvContains(std::string_view sv, T key) noexcept // c++23
 {
@@ -265,6 +192,11 @@ template<typename T>
 }
 
 [[nodiscard]] constexpr bool tr_strvStartsWith(std::string_view sv, std::string_view key) // c++20
+{
+    return std::size(key) <= std::size(sv) && sv.substr(0, std::size(key)) == key;
+}
+
+[[nodiscard]] constexpr bool tr_strvStartsWith(std::wstring_view sv, std::wstring_view key) // c++20
 {
     return std::size(key) <= std::size(sv) && sv.substr(0, std::size(key)) == key;
 }
@@ -298,7 +230,7 @@ constexpr bool tr_strvSep(std::string_view* sv, std::string_view* token, char de
     return true;
 }
 
-[[nodiscard]] std::string_view tr_strvStrip(std::string_view sv);
+[[nodiscard]] std::string_view tr_strvStrip(std::string_view str);
 
 [[nodiscard]] char* tr_strvDup(std::string_view) TR_GNUC_MALLOC;
 
@@ -346,9 +278,6 @@ std::string& tr_strvUtf8Clean(std::string_view cleanme, std::string& setme);
  * @param infinity the string representation of "infinity"
  */
 [[nodiscard]] std::string tr_strratio(double ratio, char const* infinity);
-
-/** @brief Portability wrapper for gettimeofday(), with tz argument dropped */
-struct timeval tr_gettimeofday();
 
 /**
  * @brief move a file
@@ -458,8 +387,8 @@ bool tr_env_key_exists(char const* key);
 /** @brief Get environment variable value as int. */
 int tr_env_get_int(char const* key, int default_value);
 
-/** @brief Get environment variable value as string (should be freed afterwards). */
-char* tr_env_get_string(char const* key, char const* default_value);
+/** @brief Get environment variable value as string. */
+std::string tr_env_get_string(std::string_view key, std::string_view default_value = {});
 
 /***
 ****

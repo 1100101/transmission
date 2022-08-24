@@ -365,7 +365,7 @@ void tr_peerIo::readBufferAdd(void const* data, size_t n_bytes)
 
 static size_t utp_get_rb_size(tr_peerIo* const io)
 {
-    size_t bytes = io->bandwidth().clamp(TR_DOWN, UtpReadBufferSize);
+    size_t const bytes = io->bandwidth().clamp(TR_DOWN, UtpReadBufferSize);
 
     tr_logAddTraceIo(io, fmt::format("utp_get_rb_size is saying it's ready to read {} bytes", bytes));
     return UtpReadBufferSize - bytes;
@@ -526,8 +526,8 @@ tr_peerIo* tr_peerIoNew(
     {
     case TR_PEER_SOCKET_TYPE_TCP:
         tr_logAddTraceIo(io, fmt::format("socket (tcp) is {}", socket.handle.tcp));
-        io->event_read = event_new(session->event_base, socket.handle.tcp, EV_READ, event_read_cb, io);
-        io->event_write = event_new(session->event_base, socket.handle.tcp, EV_WRITE, event_write_cb, io);
+        io->event_read = event_new(session->eventBase(), socket.handle.tcp, EV_READ, event_read_cb, io);
+        io->event_write = event_new(session->eventBase(), socket.handle.tcp, EV_WRITE, event_write_cb, io);
         break;
 
 #ifdef WITH_UTP
@@ -540,7 +540,7 @@ tr_peerIo* tr_peerIoNew(
 #endif
 
     default:
-        TR_ASSERT_MSG(false, fmt::format(FMT_STRING("unsupported peer socket type {:d}"), socket.type));
+        TR_ASSERT_MSG(false, fmt::format("unsupported peer socket type {:d}", socket.type));
     }
 
     return io;
@@ -811,12 +811,12 @@ std::string tr_peerIo::addrStr() const
     return tr_isPeerIo(this) ? this->addr_.readable(this->port_) : "error";
 }
 
-void tr_peerIoSetIOFuncs(tr_peerIo* io, tr_can_read_cb readcb, tr_did_write_cb writecb, tr_net_error_cb errcb, void* userData)
+void tr_peerIoSetIOFuncs(tr_peerIo* io, tr_can_read_cb readcb, tr_did_write_cb writecb, tr_net_error_cb errcb, void* user_data)
 {
     io->canRead = readcb;
     io->didWrite = writecb;
     io->gotError = errcb;
-    io->userData = userData;
+    io->userData = user_data;
 }
 
 void tr_peerIoClear(tr_peerIo* io)
@@ -833,7 +833,7 @@ int tr_peerIoReconnect(tr_peerIo* io)
 
     tr_session* session = tr_peerIoGetSession(io);
 
-    short int pendingEvents = io->pendingEvents;
+    short int const pendingEvents = io->pendingEvents;
     event_disable(io, EV_READ | EV_WRITE);
 
     io_close_socket(io);
@@ -846,8 +846,8 @@ int tr_peerIoReconnect(tr_peerIo* io)
         return -1;
     }
 
-    io->event_read = event_new(session->event_base, io->socket.handle.tcp, EV_READ, event_read_cb, io);
-    io->event_write = event_new(session->event_base, io->socket.handle.tcp, EV_WRITE, event_write_cb, io);
+    io->event_read = event_new(session->eventBase(), io->socket.handle.tcp, EV_READ, event_read_cb, io);
+    io->event_write = event_new(session->eventBase(), io->socket.handle.tcp, EV_WRITE, event_write_cb, io);
 
     event_enable(io, pendingEvents);
     io->session->setSocketTOS(io->socket.handle.tcp, addr.type);
@@ -927,14 +927,14 @@ void tr_peerIoWriteBuf(tr_peerIo* io, struct evbuffer* buf, bool isPieceData)
     io->outbuf_info.emplace_back(byteCount, isPieceData);
 }
 
-void tr_peerIoWriteBytes(tr_peerIo* io, void const* bytes, size_t byteCount, bool isPieceData)
+void tr_peerIoWriteBytes(tr_peerIo* io, void const* writeme, size_t writeme_len, bool is_piece_data)
 {
     struct evbuffer_iovec iovec;
-    evbuffer_reserve_space(io->outbuf.get(), byteCount, &iovec, 1);
+    evbuffer_reserve_space(io->outbuf.get(), writeme_len, &iovec, 1);
 
-    iovec.iov_len = byteCount;
+    iovec.iov_len = writeme_len;
 
-    memcpy(iovec.iov_base, bytes, iovec.iov_len);
+    memcpy(iovec.iov_base, writeme, iovec.iov_len);
 
     if (io->isEncrypted())
     {
@@ -943,7 +943,7 @@ void tr_peerIoWriteBytes(tr_peerIo* io, void const* bytes, size_t byteCount, boo
 
     evbuffer_commit_space(io->outbuf.get(), &iovec, 1);
 
-    io->outbuf_info.emplace_back(byteCount, isPieceData);
+    io->outbuf_info.emplace_back(writeme_len, is_piece_data);
 }
 
 /***

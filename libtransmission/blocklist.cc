@@ -6,8 +6,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
-#include <cstring>
+#include <cstdlib> // bsearch()
 #include <string_view>
+#include <vector>
 
 #include <fmt/core.h>
 
@@ -41,14 +42,14 @@ void BlocklistFile::load()
 {
     close();
 
-    auto info = tr_sys_path_info{};
-    if (!tr_sys_path_get_info(getFilename(), 0, &info))
+    auto const info = tr_sys_path_get_info(getFilename());
+    if (!info)
     {
         return;
     }
 
-    auto const byteCount = info.size;
-    if (byteCount == 0)
+    auto const byte_count = info->size;
+    if (byte_count == 0)
     {
         return;
     }
@@ -66,7 +67,7 @@ void BlocklistFile::load()
         return;
     }
 
-    rules_ = static_cast<struct IPv4Range*>(tr_sys_file_map_for_reading(fd, 0, byteCount, &error));
+    rules_ = static_cast<struct IPv4Range*>(tr_sys_file_map_for_reading(fd, 0, byte_count, &error));
     if (rules_ == nullptr)
     {
         tr_logAddWarn(fmt::format(
@@ -80,8 +81,8 @@ void BlocklistFile::load()
     }
 
     fd_ = fd;
-    byte_count_ = byteCount;
-    rule_count_ = byteCount / sizeof(IPv4Range);
+    byte_count_ = byte_count;
+    rule_count_ = byte_count / sizeof(IPv4Range);
 
     tr_logAddInfo(fmt::format(
         ngettext("Blocklist '{path}' has {count} entry", "Blocklist '{path}' has {count} entries", rule_count_),
@@ -112,7 +113,7 @@ bool BlocklistFile::hasAddress(tr_address const& addr)
 {
     TR_ASSERT(tr_address_is_valid(&addr));
 
-    if (!is_enabled_ || addr.type == TR_AF_INET6)
+    if (!is_enabled_ || !addr.isIPv4())
     {
         return false;
     }
@@ -155,9 +156,9 @@ bool BlocklistFile::parseLine1(std::string_view line, struct IPv4Range* range)
     {
         return false;
     }
-    if (auto addr = tr_address{}; tr_address_from_string(&addr, line.substr(0, pos)))
+    if (auto const addr = tr_address::fromString(line.substr(0, pos)); addr)
     {
-        range->begin_ = ntohl(addr.addr.addr4.s_addr);
+        range->begin_ = ntohl(addr->addr.addr4.s_addr);
     }
     else
     {
@@ -166,9 +167,9 @@ bool BlocklistFile::parseLine1(std::string_view line, struct IPv4Range* range)
     line = line.substr(pos + 1);
 
     // parse the trailing 'y.y.y.y'
-    if (auto addr = tr_address{}; tr_address_from_string(&addr, line))
+    if (auto const addr = tr_address::fromString(line); addr)
     {
-        range->end_ = ntohl(addr.addr.addr4.s_addr);
+        range->end_ = ntohl(addr->addr.addr4.s_addr);
     }
     else
     {
@@ -193,9 +194,9 @@ bool BlocklistFile::parseLine2(std::string_view line, struct IPv4Range* range)
         return false;
     }
 
-    if (auto addr = tr_address{}; tr_address_from_string(&addr, line.substr(0, pos)))
+    if (auto const addr = tr_address::fromString(line.substr(0, pos)); addr)
     {
-        range->begin_ = ntohl(addr.addr.addr4.s_addr);
+        range->begin_ = ntohl(addr->addr.addr4.s_addr);
     }
     else
     {
@@ -209,9 +210,9 @@ bool BlocklistFile::parseLine2(std::string_view line, struct IPv4Range* range)
         return false;
     }
 
-    if (auto addr = tr_address{}; tr_address_from_string(&addr, line.substr(0, pos)))
+    if (auto const addr = tr_address::fromString(line.substr(0, pos)); addr)
     {
-        range->end_ = ntohl(addr.addr.addr4.s_addr);
+        range->end_ = ntohl(addr->addr.addr4.s_addr);
     }
     else
     {

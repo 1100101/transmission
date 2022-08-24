@@ -1,8 +1,9 @@
 // This file Copyright (C) 2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstring>
@@ -59,7 +60,7 @@ public:
     {
         for (auto const& [info_hash, info] : torrents)
         {
-            if (obfuscated == *tr_sha1("req2"sv, info.info_hash))
+            if (obfuscated == tr_sha1::digest("req2"sv, info.info_hash))
             {
                 return info;
             }
@@ -68,9 +69,9 @@ public:
         return {};
     }
 
-    [[nodiscard]] event_base* eventBase() const override
+    [[nodiscard]] std::unique_ptr<libtransmission::Timer> createTimer() override
     {
-        return session_->event_base;
+        return session_->timerMaker().create();
     }
 
     [[nodiscard]] bool isDHTEnabled() const override
@@ -141,7 +142,7 @@ auto constexpr ReservedBytesNoExtensions = std::array<uint8_t, 8>{ 0, 0, 0, 0, 0
 auto constexpr PlaintextProtocolName = "\023BitTorrent protocol"sv;
 auto const DefaultPeerAddr = *tr_address::fromString("127.0.0.1"sv);
 auto const DefaultPeerPort = tr_port::fromHost(8080);
-auto const TorrentWeAreSeeding = tr_handshake_mediator::torrent_info{ *tr_sha1("abcde"sv),
+auto const TorrentWeAreSeeding = tr_handshake_mediator::torrent_info{ tr_sha1::digest("abcde"sv),
                                                                       tr_peerIdInit(),
                                                                       tr_torrent_id_t{ 100 },
                                                                       true /*is_done*/ };
@@ -266,7 +267,7 @@ TEST_F(HandshakeTest, incomingPlaintextUnknownInfoHash)
     auto [io, sock] = createIncomingIo(session_);
     sendToClient(sock, PlaintextProtocolName);
     sendToClient(sock, ReservedBytesNoExtensions);
-    sendToClient(sock, *tr_sha1("some other torrent unknown to us"sv));
+    sendToClient(sock, tr_sha1::digest("some other torrent unknown to us"sv));
     sendToClient(sock, makeRandomPeerId());
 
     auto const res = runHandshake(mediator, io);

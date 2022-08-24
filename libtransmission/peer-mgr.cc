@@ -5,10 +5,10 @@
 
 #include <algorithm>
 #include <cerrno> /* error codes ERANGE, ... */
+#include <chrono>
 #include <climits> /* INT_MAX */
 #include <cmath>
 #include <cstdint>
-#include <cstdlib> /* qsort */
 #include <ctime> // time_t
 #include <deque>
 #include <iterator> // std::back_inserter
@@ -18,8 +18,6 @@
 #include <tuple> // std::tie
 #include <utility>
 #include <vector>
-
-#include <event2/event.h>
 
 #include <fmt/format.h>
 
@@ -42,13 +40,14 @@
 #include "peer-mgr.h"
 #include "peer-msgs.h"
 #include "session.h"
-#include "stats.h" /* tr_statsAddUploaded, tr_statsAddDownloaded */
 #include "torrent.h"
 #include "tr-assert.h"
 #include "tr-dht.h"
 #include "tr-utp.h"
 #include "utils.h"
 #include "webseed.h"
+
+using namespace std::literals;
 
 // use for bitwise operations w/peer_atom.flags2
 static auto constexpr MyflagBanned = int{ 1 };
@@ -85,10 +84,15 @@ private:
     }
 
 public:
-    tr_handshake_mediator_impl(tr_session& session)
+    explicit tr_handshake_mediator_impl(tr_session& session)
         : session_{ session }
     {
     }
+
+    tr_handshake_mediator_impl(tr_handshake_mediator_impl&&) = delete;
+    tr_handshake_mediator_impl(tr_handshake_mediator_impl const&) = delete;
+    tr_handshake_mediator_impl& operator=(tr_handshake_mediator_impl&&) = delete;
+    tr_handshake_mediator_impl& operator=(tr_handshake_mediator_impl const&) = delete;
 
     virtual ~tr_handshake_mediator_impl() = default;
 
@@ -122,9 +126,9 @@ public:
         return tor != nullptr && tr_peerMgrPeerIsSeed(tor, addr);
     }
 
-    [[nodiscard]] event_base* eventBase() const override
+    [[nodiscard]] std::unique_ptr<libtransmission::Timer> createTimer() override
     {
-        return session_.event_base;
+        return session_.timerMaker().create();
     }
 
     [[nodiscard]] size_t pad(void* setme, size_t maxlen) const override
@@ -182,7 +186,7 @@ struct peer_atom
             return *blocklisted_;
         }
 
-        auto const value = tr_sessionIsAddressBlocked(session, &addr);
+        auto const value = session->addressIsBlocked(addr);
         blocklisted_ = value;
         return value;
     }
@@ -463,7 +467,7 @@ public:
         return is_endgame_;
     }
 
-    void addStrike(tr_peer* peer)
+    void addStrike(tr_peer* peer) const
     {
         tr_logAddTraceSwarm(this, fmt::format("increasing peer {} strike count to {}", peer->readable(), peer->strikes + 1));
 
@@ -557,28 +561,23 @@ private:
     bool is_endgame_ = false;
 };
 
-struct EventDeleter
-{
-    void operator()(struct event* ev) const
-    {
-        event_free(ev);
-    }
-};
-
-using UniqueTimer = std::unique_ptr<struct event, EventDeleter>;
-
 struct tr_peerMgr
 {
     explicit tr_peerMgr(tr_session* session_in)
         : session{ session_in }
-        , bandwidth_timer_{ evtimer_new(session->event_base, bandwidthPulseMarshall, this) }
-        , rechoke_timer_{ evtimer_new(session->event_base, rechokePulseMarshall, this) }
-        , refill_upkeep_timer_{ evtimer_new(session->event_base, refillUpkeepMarshall, this) }
+        , bandwidth_timer_{ session->timerMaker().create([this]() { bandwidthPulse(); }) }
+        , rechoke_timer_{ session->timerMaker().create([this]() { rechokePulseMarshall(); }) }
+        , refill_upkeep_timer_{ session->timerMaker().create([this]() { refillUpkeep(); }) }
     {
-        tr_timerAddMsec(*bandwidth_timer_, BandwidthPeriodMsec);
-        tr_timerAddMsec(*rechoke_timer_, RechokePeriodMsec);
-        tr_timerAddMsec(*refill_upkeep_timer_, RefillUpkeepPeriodMsec);
+        bandwidth_timer_->startRepeating(BandwidthPeriod);
+        rechoke_timer_->startSingleShot(RechokePeriod);
+        refill_upkeep_timer_->startRepeating(RefillUpkeepPeriod);
     }
+
+    tr_peerMgr(tr_peerMgr&&) = delete;
+    tr_peerMgr(tr_peerMgr const&) = delete;
+    tr_peerMgr& operator=(tr_peerMgr&&) = delete;
+    tr_peerMgr& operator=(tr_peerMgr const&) = delete;
 
     [[nodiscard]] auto unique_lock() const
     {
@@ -593,7 +592,7 @@ struct tr_peerMgr
 
     void rechokeSoon() noexcept
     {
-        tr_timerAddMsec(*rechoke_timer_, 100);
+        rechoke_timer_->startSingleShot(100ms);
     }
 
     void bandwidthPulse();
@@ -606,34 +605,19 @@ struct tr_peerMgr
     Handshakes incoming_handshakes;
 
 private:
-    static void bandwidthPulseMarshall(evutil_socket_t, short /*reason*/, void* vmgr)
+    void rechokePulseMarshall()
     {
-        auto* const self = static_cast<tr_peerMgr*>(vmgr);
-        self->bandwidthPulse();
-        tr_timerAddMsec(*self->bandwidth_timer_, BandwidthPeriodMsec);
+        rechokePulse();
+        rechoke_timer_->startSingleShot(RechokePeriod);
     }
 
-    static void rechokePulseMarshall(evutil_socket_t, short /*reason*/, void* vmgr)
-    {
-        auto* const self = static_cast<tr_peerMgr*>(vmgr);
-        self->rechokePulse();
-        tr_timerAddMsec(*self->rechoke_timer_, RechokePeriodMsec);
-    }
+    std::unique_ptr<libtransmission::Timer> const bandwidth_timer_;
+    std::unique_ptr<libtransmission::Timer> const rechoke_timer_;
+    std::unique_ptr<libtransmission::Timer> const refill_upkeep_timer_;
 
-    static void refillUpkeepMarshall(evutil_socket_t, short /*reason*/, void* vmgr)
-    {
-        auto* const self = static_cast<tr_peerMgr*>(vmgr);
-        self->refillUpkeep();
-        tr_timerAddMsec(*self->refill_upkeep_timer_, RefillUpkeepPeriodMsec);
-    }
-
-    UniqueTimer const bandwidth_timer_;
-    UniqueTimer const rechoke_timer_;
-    UniqueTimer const refill_upkeep_timer_;
-
-    static auto constexpr BandwidthPeriodMsec = int{ 500 };
-    static auto constexpr RechokePeriodMsec = int{ 10 * 1000 };
-    static auto constexpr RefillUpkeepPeriodMsec = int{ 10 * 1000 };
+    static auto constexpr BandwidthPeriod = 500ms;
+    static auto constexpr RechokePeriod = 10s;
+    static auto constexpr RefillUpkeepPeriod = 10s;
 
     // how frequently to decide which peers live and die
     static auto constexpr ReconnectPeriodMsec = int{ 500 };
@@ -826,6 +810,11 @@ std::vector<tr_block_span_t> tr_peerMgrGetNextRequests(tr_torrent* torrent, tr_p
         {
         }
 
+        MediatorImpl(MediatorImpl&&) = delete;
+        MediatorImpl(MediatorImpl const&) = delete;
+        MediatorImpl& operator=(MediatorImpl&&) = delete;
+        MediatorImpl& operator=(MediatorImpl const&) = delete;
+
         ~MediatorImpl() override = default;
 
         [[nodiscard]] bool clientCanRequestBlock(tr_block_index_t block) const override
@@ -998,7 +987,7 @@ static void peerCallbackFunc(tr_peer* peer, tr_peer_event const* e, void* vs)
             tr_announcerAddBytes(tor, TR_ANN_UP, e->length);
             tor->setDateActive(now);
             tor->setDirty();
-            tr_statsAddUploaded(tor->session, e->length);
+            tor->session->addUploaded(e->length);
 
             if (peer->atom != nullptr)
             {
@@ -1016,8 +1005,7 @@ static void peerCallbackFunc(tr_peer* peer, tr_peer_event const* e, void* vs)
             tor->downloadedCur += e->length;
             tor->setDateActive(now);
             tor->setDirty();
-
-            tr_statsAddDownloaded(tor->session, e->length);
+            tor->session->addDownloaded(e->length);
 
             if (peer->atom != nullptr)
             {
@@ -1155,7 +1143,7 @@ static bool on_handshake_done(tr_handshake_result const& result)
 {
     TR_ASSERT(result.io != nullptr);
 
-    bool ok = result.isConnected;
+    bool const ok = result.isConnected;
     bool success = false;
     auto* manager = static_cast<tr_peerMgr*>(result.userData);
 
@@ -1252,12 +1240,12 @@ static bool on_handshake_done(tr_handshake_result const& result)
 
 void tr_peerMgrAddIncoming(tr_peerMgr* manager, tr_address const* addr, tr_port port, struct tr_peer_socket const socket)
 {
-    TR_ASSERT(tr_isSession(manager->session));
+    TR_ASSERT(manager->session != nullptr);
     auto const lock = manager->unique_lock();
 
     tr_session* session = manager->session;
 
-    if (tr_sessionIsAddressBlocked(session, addr))
+    if (session->addressIsBlocked(*addr))
     {
         tr_logAddTrace(fmt::format("Banned IP address '{}' tried to connect to us", addr->readable(port)));
         tr_netClosePeerSocket(session, socket);
@@ -1270,7 +1258,7 @@ void tr_peerMgrAddIncoming(tr_peerMgr* manager, tr_address const* addr, tr_port 
     {
         auto mediator = std::make_shared<tr_handshake_mediator_impl>(*session);
         tr_peerIo* const io = tr_peerIoNewIncoming(session, &session->top_bandwidth_, addr, port, tr_time(), socket);
-        tr_handshake* const handshake = tr_handshakeNew(mediator, io, session->encryptionMode, on_handshake_done, manager);
+        tr_handshake* const handshake = tr_handshakeNew(mediator, io, session->encryptionMode(), on_handshake_done, manager);
 
         tr_peerIoUnref(io); /* balanced by the implicit ref in tr_peerIoNewIncoming() */
 
@@ -1301,8 +1289,7 @@ size_t tr_peerMgrAddPex(tr_torrent* tor, uint8_t from, tr_pex const* pex, size_t
     for (tr_pex const* const end = pex + n_pex; pex != end; ++pex)
     {
         if (tr_isPex(pex) && /* safeguard against corrupt data */
-            !tr_sessionIsAddressBlocked(s->manager->session, &pex->addr) &&
-            tr_address_is_valid_for_peers(&pex->addr, pex->port))
+            !s->manager->session->addressIsBlocked(pex->addr) && tr_address_is_valid_for_peers(&pex->addr, pex->port))
         {
             ensureAtomExists(s, pex->addr, pex->port, pex->flags, from);
             ++n_used;
@@ -1314,7 +1301,7 @@ size_t tr_peerMgrAddPex(tr_torrent* tor, uint8_t from, tr_pex const* pex, size_t
 
 std::vector<tr_pex> tr_peerMgrCompactToPex(void const* compact, size_t compactLen, uint8_t const* added_f, size_t added_f_len)
 {
-    size_t n = compactLen / 6;
+    size_t const n = compactLen / 6;
     auto const* walk = static_cast<uint8_t const*>(compact);
     auto pex = std::vector<tr_pex>(n);
 
@@ -1334,7 +1321,7 @@ std::vector<tr_pex> tr_peerMgrCompactToPex(void const* compact, size_t compactLe
 
 std::vector<tr_pex> tr_peerMgrCompact6ToPex(void const* compact, size_t compactLen, uint8_t const* added_f, size_t added_f_len)
 {
-    size_t n = compactLen / 18;
+    size_t const n = compactLen / 18;
     auto const* walk = static_cast<uint8_t const*>(compact);
     auto pex = std::vector<tr_pex>(n);
 
@@ -1443,14 +1430,14 @@ struct CompareAtomsByUsefulness
 
 } // namespace get_peers_helpers
 
-std::vector<tr_pex> tr_peerMgrGetPeers(tr_torrent const* tor, uint8_t af, uint8_t list_mode, size_t max_count)
+std::vector<tr_pex> tr_peerMgrGetPeers(tr_torrent const* tor, uint8_t address_type, uint8_t list_mode, size_t max_peer_count)
 {
     using namespace get_peers_helpers;
 
     TR_ASSERT(tr_isTorrent(tor));
     auto const lock = tor->unique_lock();
 
-    TR_ASSERT(af == TR_AF_INET || af == TR_AF_INET6);
+    TR_ASSERT(address_type == TR_AF_INET || address_type == TR_AF_INET6);
     TR_ASSERT(list_mode == TR_PEERS_CONNECTED || list_mode == TR_PEERS_INTERESTING);
 
     tr_swarm const* s = tor->swarm;
@@ -1486,7 +1473,7 @@ std::vector<tr_pex> tr_peerMgrGetPeers(tr_torrent const* tor, uint8_t af, uint8_
     ***  add the first N of them into our return list
     **/
 
-    auto const n = std::min(std::size(atoms), max_count);
+    auto const n = std::min(std::size(atoms), max_peer_count);
     auto pex = std::vector<tr_pex>{};
     pex.reserve(n);
 
@@ -1494,7 +1481,7 @@ std::vector<tr_pex> tr_peerMgrGetPeers(tr_torrent const* tor, uint8_t af, uint8_
     {
         auto const* const atom = atoms[i];
 
-        if (atom->addr.type == af)
+        if (atom->addr.type == address_type)
         {
             TR_ASSERT(tr_address_is_valid(&atom->addr));
             pex.emplace_back(atom->addr, atom->port, atom->flags);
@@ -1807,7 +1794,7 @@ tr_peer_stat* tr_peerMgrPeerStats(tr_torrent const* tor, int* setme_count)
     TR_ASSERT(tor->swarm->manager != nullptr);
 
     auto const n = tor->swarm->peerCount();
-    auto* const ret = tr_new0(tr_peer_stat, n);
+    auto* const ret = new tr_peer_stat[n];
 
     auto const now = tr_time();
     auto const now_msec = tr_time_msec();
@@ -1838,7 +1825,7 @@ namespace
 /* does this peer have any pieces that we want? */
 [[nodiscard]] bool isPeerInteresting(
     tr_torrent* const tor,
-    bool const* const piece_is_interesting,
+    std::vector<bool> const& piece_is_interesting,
     tr_peerMsgs const* const peer)
 {
     /* these cases should have already been handled by the calling code... */
@@ -1870,23 +1857,37 @@ enum tr_rechoke_state
 
 struct tr_rechoke_info
 {
-    tr_peerMsgs* peer;
-    int salt;
-    int rechoke_state;
-};
-
-[[nodiscard]] constexpr int compare_rechoke_info(void const* va, void const* vb)
-{
-    auto const* const a = static_cast<struct tr_rechoke_info const*>(va);
-    auto const* const b = static_cast<struct tr_rechoke_info const*>(vb);
-
-    if (a->rechoke_state != b->rechoke_state)
+    tr_rechoke_info(tr_peerMsgs* peer_in, int rechoke_state_in, uint8_t salt_in)
+        : peer{ peer_in }
+        , rechoke_state{ rechoke_state_in }
+        , salt{ salt_in }
     {
-        return a->rechoke_state - b->rechoke_state;
     }
 
-    return a->salt - b->salt;
-}
+    [[nodiscard]] constexpr auto compare(tr_rechoke_info const& that) const noexcept // <=>
+    {
+        if (this->rechoke_state != that.rechoke_state)
+        {
+            return this->rechoke_state - that.rechoke_state;
+        }
+
+        if (this->salt != that.salt)
+        {
+            return this->salt < that.salt ? -1 : 1;
+        }
+
+        return 0;
+    }
+
+    [[nodiscard]] constexpr auto operator<(tr_rechoke_info const& that) const noexcept
+    {
+        return compare(that) < 0;
+    }
+
+    tr_peerMsgs* peer;
+    int rechoke_state;
+    uint8_t salt;
+};
 
 } // namespace
 
@@ -1900,8 +1901,8 @@ void rechokeDownloads(tr_swarm* s)
     auto const now = tr_time();
 
     uint16_t max_peers = 0;
-    uint16_t rechoke_count = 0;
-    struct tr_rechoke_info* rechoke = nullptr;
+    auto rechoke = std::vector<tr_rechoke_info>{};
+    auto salter = tr_salt_shaker{};
 
     /* some cases where this function isn't necessary */
     if (s->tor->isDone() || !s->tor->clientCanDownload())
@@ -1982,11 +1983,14 @@ void rechokeDownloads(tr_swarm* s)
 
     if (peerCount > 0)
     {
+        rechoke.reserve(peerCount);
+
         auto const* const tor = s->tor;
         int const n = tor->pieceCount();
 
         /* build a bitfield of interesting pieces... */
-        auto* const piece_is_interesting = tr_new(bool, n);
+        auto piece_is_interesting = std::vector<bool>{};
+        piece_is_interesting.resize(n);
 
         for (int i = 0; i < n; ++i)
         {
@@ -2027,37 +2031,21 @@ void rechokeDownloads(tr_swarm* s)
                     rechoke_state = RECHOKE_STATE_BAD;
                 }
 
-                if (rechoke == nullptr)
-                {
-                    rechoke = tr_new(struct tr_rechoke_info, peerCount);
-                }
-
-                rechoke[rechoke_count].peer = peer;
-                rechoke[rechoke_count].rechoke_state = rechoke_state;
-                rechoke[rechoke_count].salt = tr_rand_int_weak(INT_MAX);
-                rechoke_count++;
+                rechoke.emplace_back(peer, rechoke_state, salter());
             }
         }
-
-        tr_free(piece_is_interesting);
     }
 
-    if ((rechoke != nullptr) && (rechoke_count > 0))
-    {
-        qsort(rechoke, rechoke_count, sizeof(struct tr_rechoke_info), compare_rechoke_info);
-    }
+    std::sort(std::begin(rechoke), std::end(rechoke));
 
     /* now that we know which & how many peers to be interested in... update the peer interest */
 
-    s->interested_count = std::min(max_peers, rechoke_count);
+    s->interested_count = std::min(max_peers, static_cast<uint16_t>(std::size(rechoke)));
 
-    for (int i = 0; i < rechoke_count; ++i)
+    for (size_t i = 0, n = std::size(rechoke); i < n; ++i)
     {
         rechoke[i].peer->set_interested(i < s->interested_count);
     }
-
-    /* cleanup */
-    tr_free(rechoke);
 }
 
 } // namespace rechoke_downloads_helpers
@@ -2085,36 +2073,48 @@ namespace
 
 struct ChokeData
 {
-    bool isInterested;
-    bool wasChoked;
-    bool isChoked;
-    int rate;
-    int salt;
+    ChokeData(tr_peerMsgs* msgs_in, int rate_in, uint8_t salt_in, bool is_interested_in, bool was_choked_in, bool is_choked_in)
+        : msgs{ msgs_in }
+        , rate{ rate_in }
+        , salt{ salt_in }
+        , is_interested{ is_interested_in }
+        , was_choked{ was_choked_in }
+        , is_choked{ is_choked_in }
+    {
+    }
+
     tr_peerMsgs* msgs;
+    int rate;
+    uint8_t salt;
+    bool is_interested;
+    bool was_choked;
+    bool is_choked;
+
+    [[nodiscard]] constexpr auto compare(ChokeData const& that) const noexcept // <=>
+    {
+        if (this->rate != that.rate) // prefer higher overall speeds
+        {
+            return this->rate > that.rate ? -1 : 1;
+        }
+
+        if (this->was_choked != that.was_choked) // prefer unchoked
+        {
+            return this->was_choked ? 1 : -1;
+        }
+
+        if (this->salt != that.salt) // random order
+        {
+            return this->salt < that.salt ? -1 : 1;
+        }
+
+        return 0;
+    }
+
+    [[nodiscard]] constexpr auto operator<(ChokeData const& that) const noexcept
+    {
+        return compare(that) < 0;
+    }
 };
-
-[[nodiscard]] constexpr int compareChoke(void const* va, void const* vb) noexcept
-{
-    auto const* const a = static_cast<struct ChokeData const*>(va);
-    auto const* const b = static_cast<struct ChokeData const*>(vb);
-
-    if (a->rate != b->rate) // prefer higher overall speeds
-    {
-        return a->rate > b->rate ? -1 : 1;
-    }
-
-    if (a->wasChoked != b->wasChoked) // prefer unchoked
-    {
-        return a->wasChoked ? 1 : -1;
-    }
-
-    if (a->salt != b->salt) // random order
-    {
-        return a->salt - b->salt;
-    }
-
-    return 0;
-}
 
 /* is this a new connection? */
 [[nodiscard]] bool isNew(tr_peerMsgs const* msgs)
@@ -2154,7 +2154,8 @@ void rechokeUploads(tr_swarm* s, uint64_t const now)
 
     auto const peerCount = s->peerCount();
     auto& peers = s->peers;
-    auto* const choke = tr_new0(struct ChokeData, peerCount);
+    auto choked = std::vector<ChokeData>{};
+    choked.reserve(peerCount);
     auto const* const session = s->manager->session;
     bool const chokeAll = !s->tor->clientCanUpload();
     bool const isMaxedOut = isBandwidthMaxedOut(s->tor->bandwidth_, now, TR_UP);
@@ -2170,9 +2171,8 @@ void rechokeUploads(tr_swarm* s, uint64_t const now)
         s->optimistic = nullptr;
     }
 
-    int size = 0;
-
     /* sort the peers by preference and rate */
+    auto salter = tr_salt_shaker{};
     for (auto* const peer : peers)
     {
         if (peer->isSeed())
@@ -2187,17 +2187,17 @@ void rechokeUploads(tr_swarm* s, uint64_t const now)
         }
         else if (peer != s->optimistic)
         {
-            struct ChokeData* n = &choke[size++];
-            n->msgs = peer;
-            n->isInterested = peer->is_peer_interested();
-            n->wasChoked = peer->is_peer_choked();
-            n->rate = getRateBps(s->tor, peer, now);
-            n->salt = tr_rand_int_weak(INT_MAX);
-            n->isChoked = true;
+            choked.emplace_back(
+                peer,
+                getRateBps(s->tor, peer, now),
+                salter(),
+                peer->is_peer_interested(),
+                peer->is_peer_choked(),
+                true);
         }
     }
 
-    qsort(choke, size, sizeof(struct ChokeData), compareChoke);
+    std::sort(std::begin(choked), std::end(choked));
 
     /**
      * Reciprocation and number of uploads capping is managed by unchoking
@@ -2214,57 +2214,57 @@ void rechokeUploads(tr_swarm* s, uint64_t const now)
      *
      * If our bandwidth is maxed out, don't unchoke any more peers.
      */
-    int checkedChokeCount = 0;
-    int unchokedInterested = 0;
+    auto checked_choke_count = size_t{ 0U };
+    auto unchoked_interested = size_t{ 0U };
 
-    for (int i = 0; i < size && unchokedInterested < session->uploadSlotsPerTorrent; ++i)
+    for (auto& item : choked)
     {
-        choke[i].isChoked = isMaxedOut ? choke[i].wasChoked : false;
-
-        ++checkedChokeCount;
-
-        if (choke[i].isInterested)
+        if (unchoked_interested >= session->uploadSlotsPerTorrent())
         {
-            ++unchokedInterested;
+            break;
+        }
+
+        item.is_choked = isMaxedOut ? item.was_choked : false;
+
+        ++checked_choke_count;
+
+        if (item.is_interested)
+        {
+            ++unchoked_interested;
         }
     }
 
     /* optimistic unchoke */
-    if (s->optimistic == nullptr && !isMaxedOut && checkedChokeCount < size)
+    if (s->optimistic == nullptr && !isMaxedOut && checked_choke_count < std::size(choked))
     {
-        auto randPool = std::vector<ChokeData*>{};
+        auto rand_pool = std::vector<ChokeData*>{};
 
-        for (int i = checkedChokeCount; i < size; ++i)
+        for (auto i = checked_choke_count, n = std::size(choked); i < n; ++i)
         {
-            if (choke[i].isInterested)
+            if (choked[i].is_interested)
             {
-                tr_peerMsgs const* msgs = choke[i].msgs;
-                int const x = isNew(msgs) ? 3 : 1;
+                int const x = isNew(choked[i].msgs) ? 3 : 1;
 
                 for (int y = 0; y < x; ++y)
                 {
-                    randPool.push_back(&choke[i]);
+                    rand_pool.push_back(&choked[i]);
                 }
             }
         }
 
-        auto const n = std::size(randPool);
-        if (n != 0)
+        if (auto const n = std::size(rand_pool); n != 0)
         {
-            auto* c = randPool[tr_rand_int_weak(n)];
-            c->isChoked = false;
+            auto* c = rand_pool[tr_rand_int_weak(n)];
+            c->is_choked = false;
             s->optimistic = c->msgs;
             s->optimistic_unchoke_time_scaler = OptimisticUnchokeMultiplier;
         }
     }
 
-    for (int i = 0; i < size; ++i)
+    for (auto& item : choked)
     {
-        choke[i].msgs->set_choke(choke[i].isChoked);
+        item.msgs->set_choke(item.is_choked);
     }
-
-    /* cleanup */
-    tr_free(choke);
 }
 
 } // namespace rechoke_uploads_helpers
@@ -2457,7 +2457,7 @@ void enforceSessionPeerLimit(tr_session* session)
         std::end(torrents),
         size_t{},
         [](size_t sum, tr_torrent const* tor) { return sum + tor->swarm->peerCount(); });
-    size_t const max = tr_sessionGetPeerLimit(session);
+    size_t const max = session->peerLimit();
     if (n_peers <= max)
     {
         return;
@@ -2536,22 +2536,19 @@ void pumpAllPeers(tr_peerMgr* mgr)
 
 void queuePulse(tr_session* session, tr_direction dir)
 {
-    TR_ASSERT(tr_isSession(session));
+    TR_ASSERT(session != nullptr);
     TR_ASSERT(tr_isDirection(dir));
 
-    if (tr_sessionGetQueueEnabled(session, dir))
+    if (!session->queueEnabled(dir))
     {
-        auto const n = tr_sessionCountQueueFreeSlots(session, dir);
+        return;
+    }
 
-        for (auto* tor : tr_sessionGetNextQueuedTorrents(session, dir, n))
-        {
-            tr_torrentStartNow(tor);
-
-            if (tor->queue_started_callback != nullptr)
-            {
-                (*tor->queue_started_callback)(tor, tor->queue_started_user_data);
-            }
-        }
+    auto const n = session->countQueueFreeSlots(dir);
+    for (auto* tor : session->getNextQueuedTorrents(dir, n))
+    {
+        tr_torrentStartNow(tor);
+        session->onQueuedTorrentStarted(tor);
     }
 }
 
@@ -2566,8 +2563,9 @@ void tr_peerMgr::bandwidthPulse()
     pumpAllPeers(this);
 
     /* allocate bandwidth to the peers */
-    session->top_bandwidth_.allocate(TR_UP, BandwidthPeriodMsec);
-    session->top_bandwidth_.allocate(TR_DOWN, BandwidthPeriodMsec);
+    auto const msec = std::chrono::duration_cast<std::chrono::milliseconds>(BandwidthPeriod).count();
+    session->top_bandwidth_.allocate(TR_UP, msec);
+    session->top_bandwidth_.allocate(TR_DOWN, msec);
 
     /* torrent upkeep */
     for (auto* const tor : session->torrents())
@@ -2740,7 +2738,7 @@ struct peer_candidate
     auto const now_msec = tr_time_msec();
 
     // leave 5% of connection slots for incoming connections -- ticket #2609
-    auto const max_candidates = static_cast<size_t>(tr_sessionGetPeerLimit(session) * 0.95);
+    auto const max_candidates = static_cast<size_t>(session->peerLimit() * 0.95);
 
     /* count how many peers and atoms we've got */
     auto atom_count = size_t{};
@@ -2761,6 +2759,7 @@ struct peer_candidate
     candidates.reserve(atom_count);
 
     /* populate the candidate array */
+    auto salter = tr_salt_shaker{};
     for (auto* tor : session->torrents())
     {
         if (!tor->swarm->is_running)
@@ -2792,8 +2791,7 @@ struct peer_candidate
         {
             if (isPeerCandidate(tor, atom, now))
             {
-                uint8_t const salt = tr_rand_int_weak(1024);
-                candidates.push_back({ getPeerCandidateScore(tor, atom, salt), tor, &atom });
+                candidates.push_back({ getPeerCandidateScore(tor, atom, salter()), tor, &atom });
             }
         }
     }
@@ -2815,7 +2813,7 @@ struct peer_candidate
 void initiateConnection(tr_peerMgr* mgr, tr_swarm* s, peer_atom& atom)
 {
     time_t const now = tr_time();
-    bool utp = tr_sessionIsUTPEnabled(mgr->session) && !atom.utp_failed;
+    bool utp = mgr->session->allowsUTP() && !atom.utp_failed;
 
     if (atom.fromFirst == TR_PEER_FROM_PEX)
     {
@@ -2846,7 +2844,7 @@ void initiateConnection(tr_peerMgr* mgr, tr_swarm* s, peer_atom& atom)
     else
     {
         auto mediator = std::make_shared<tr_handshake_mediator_impl>(*mgr->session);
-        tr_handshake* handshake = tr_handshakeNew(mediator, io, mgr->session->encryptionMode, on_handshake_done, mgr);
+        tr_handshake* handshake = tr_handshakeNew(mediator, io, mgr->session->encryptionMode(), on_handshake_done, mgr);
 
         TR_ASSERT(io->torrentHash());
 

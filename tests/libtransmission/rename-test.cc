@@ -1,17 +1,15 @@
 // This file Copyright (C) 2013-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
 #include "transmission.h"
 
-#include "crypto-utils.h"
 #include "file.h"
 #include "resume.h"
 #include "torrent.h" // tr_isTorrent()
 #include "tr-assert.h"
 #include "tr-strbuf.h"
-#include "utils.h"
 #include "variant.h"
 
 #include "test-fixtures.h"
@@ -41,7 +39,7 @@ protected:
         tr_torrentRemove(tor, false, nullptr);
         auto const test = [this, expected_torrent_count]()
         {
-            return tr_sessionCountTorrents(session_) == expected_torrent_count;
+            return std::size(session_->torrents()) == expected_torrent_count;
         };
         EXPECT_TRUE(waitFor(test, MaxWaitMsec));
     }
@@ -87,26 +85,17 @@ protected:
         return tor;
     }
 
-    static bool testFileExistsAndConsistsOfThisString(tr_torrent const* tor, tr_file_index_t file_index, std::string const& str)
+    static bool testFileExistsAndConsistsOfThisString(tr_torrent const* tor, tr_file_index_t file_index, std::string_view str)
     {
-        auto const str_len = str.size();
-        auto success = false;
-
-        auto* path = tr_torrentFindFile(tor, file_index);
-        if (path != nullptr)
+        if (auto const found = tor->findFile(file_index); found)
         {
-            EXPECT_TRUE(tr_sys_path_exists(path));
-
-            size_t contents_len;
-            uint8_t* contents = tr_loadFile(path, &contents_len, nullptr);
-
-            success = contents != nullptr && str_len == contents_len && memcmp(contents, str.data(), contents_len) == 0;
-
-            tr_free(contents);
-            tr_free(path);
+            EXPECT_TRUE(tr_sys_path_exists(found->filename()));
+            auto contents = std::vector<char>{};
+            return tr_loadFile(found->filename(), contents) &&
+                std::string_view{ std::data(contents), std::size(contents) } == str;
         }
 
-        return success;
+        return false;
     }
 
     static void expectHaveNone(tr_torrent* tor, uint64_t total_size)

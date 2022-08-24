@@ -11,6 +11,7 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <arc4.h>
 
@@ -73,11 +74,11 @@ std::string tr_salt(std::string_view plaintext, std::string_view salt)
     static_assert(DigestStringSize == 40);
 
     // build a sha1 digest of the original content and the salt
-    auto const digest = tr_sha1(plaintext, salt);
+    auto const digest = tr_sha1::digest(plaintext, salt);
 
     // convert it to a string. string holds three parts:
     // DigestPrefix, stringified digest of plaintext + salt, and the salt.
-    return fmt::format(FMT_STRING("{:s}{:s}{:s}"), SaltedPrefix, (digest ? tr_sha1_to_string(*digest) : ""sv), salt);
+    return fmt::format(FMT_STRING("{:s}{:s}{:s}"), SaltedPrefix, tr_sha1_to_string(digest), salt);
 }
 
 } // namespace
@@ -121,7 +122,7 @@ bool tr_ssha1_matches(std::string_view ssha1, std::string_view plaintext)
 
 static size_t base64_alloc_size(std::string_view input)
 {
-    size_t ret_length = 4 * ((std::size(input) + 2) / 3);
+    size_t ret_length = 4 * ((std::size(input) + 2) / 3); // NOLINT misc-const-correctness
 #ifdef USE_SYSTEM_B64
     // Additional space is needed for newlines if we're using unpatched libb64
     ret_length += ret_length / 72 + 1;
