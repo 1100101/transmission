@@ -17,6 +17,7 @@ add_executable(libtransmission-test
     handshake-test.cc
     history-test.cc
     json-test.cc
+    lpd-test.cc
     magnet-metainfo-test.cc
     makemeta-test.cc
     move-test.cc
@@ -35,6 +36,7 @@ add_executable(libtransmission-test
     subprocess-test.cc
     test-fixtures.h
     torrent-files-test.cc
+    torrent-magnet-test.cc
     torrent-metainfo-test.cc
     torrents-test.cc
     utils-test.cc

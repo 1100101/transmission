@@ -93,8 +93,6 @@ public:
     {
     }
 
-    ~tr_torrent() override = default;
-
     void setLocation(
         std::string_view location,
         bool move_from_old_path,
@@ -140,15 +138,15 @@ public:
     {
         return metainfo_.blockCount();
     }
-    [[nodiscard]] auto byteLoc(uint64_t byte) const
+    [[nodiscard]] constexpr auto byteLoc(uint64_t byte) const
     {
         return metainfo_.byteLoc(byte);
     }
-    [[nodiscard]] auto blockLoc(tr_block_index_t block) const
+    [[nodiscard]] constexpr auto blockLoc(tr_block_index_t block) const
     {
         return metainfo_.blockLoc(block);
     }
-    [[nodiscard]] auto pieceLoc(tr_piece_index_t piece, uint32_t offset = 0, uint32_t length = 0) const
+    [[nodiscard]] constexpr auto pieceLoc(tr_piece_index_t piece, uint32_t offset = 0, uint32_t length = 0) const
     {
         return metainfo_.pieceLoc(piece, offset, length);
     }
@@ -189,17 +187,17 @@ public:
         return completion.sizeWhenDone();
     }
 
-    [[nodiscard]] auto hasMetainfo() const noexcept
+    [[nodiscard]] constexpr auto hasMetainfo() const noexcept
     {
         return completion.hasMetainfo();
     }
 
-    [[nodiscard]] auto hasAll() const noexcept
+    [[nodiscard]] constexpr auto hasAll() const noexcept
     {
         return completion.hasAll();
     }
 
-    [[nodiscard]] auto hasNone() const noexcept
+    [[nodiscard]] constexpr auto hasNone() const noexcept
     {
         return completion.hasNone();
     }
@@ -224,7 +222,7 @@ public:
         return completion.countMissingBytesInPiece(piece);
     }
 
-    [[nodiscard]] auto hasTotal() const
+    [[nodiscard]] constexpr auto hasTotal() const
     {
         return completion.hasTotal();
     }
@@ -249,7 +247,7 @@ public:
         return completeness == TR_PARTIAL_SEED;
     }
 
-    [[nodiscard]] tr_bitfield const& blocks() const noexcept
+    [[nodiscard]] constexpr auto& blocks() const noexcept
     {
         return completion.blocks();
     }
@@ -771,6 +769,8 @@ tr_torrent_metainfo tr_ctorStealMetainfo(tr_ctor* ctor);
 bool tr_ctorSetMetainfoFromFile(tr_ctor* ctor, std::string_view filename, tr_error** error = nullptr);
 bool tr_ctorSetMetainfoFromMagnetLink(tr_ctor* ctor, std::string_view magnet_link, tr_error** error = nullptr);
 void tr_ctorSetLabels(tr_ctor* ctor, tr_quark const* labels, size_t n_labels);
+void tr_ctorSetBandwidthPriority(tr_ctor* ctor, tr_priority_t priority);
+tr_priority_t tr_ctorGetBandwidthPriority(tr_ctor const* ctor);
 tr_torrent::labels_t const& tr_ctorGetLabels(tr_ctor const* ctor);
 
 #define tr_logAddCriticalTor(tor, msg) tr_logAddCritical(msg, (tor)->name())

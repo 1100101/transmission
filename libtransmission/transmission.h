@@ -265,16 +265,6 @@ void tr_sessionSetDownloadDir(tr_session* session, char const* downloadDir);
 char const* tr_sessionGetDownloadDir(tr_session const* session);
 
 /**
- * @brief Set the torrent's bandwidth priority.
- */
-void tr_ctorSetBandwidthPriority(tr_ctor* ctor, tr_priority_t priority);
-
-/**
- * @brief Get the torrent's bandwidth priority.
- */
-tr_priority_t tr_ctorGetBandwidthPriority(tr_ctor const* ctor);
-
-/**
  * @brief set the per-session incomplete download folder.
  *
  * When you add a new torrent and the session's incomplete directory is enabled,
@@ -324,7 +314,7 @@ bool tr_sessionIsIncompleteFileNamingEnabled(tr_session const* session);
  * @details If true, libtransmission will open a server socket to listen
  * for incoming http RPC requests as described in docs/rpc-spec.md.
  *
- * This is intially set by tr_sessionInit() and can be
+ * This is initially set by tr_sessionInit() and can be
  * queried by tr_sessionIsRPCEnabled().
  */
 void tr_sessionSetRPCEnabled(tr_session* session, bool is_enabled);
@@ -764,7 +754,7 @@ bool tr_blocklistIsEnabled(tr_session const* session);
 
 void tr_blocklistSetEnabled(tr_session* session, bool isEnabled);
 
-/** @brief The blocklist that ges updated when an RPC client
+/** @brief The blocklist that gets updated when an RPC client
            invokes the "blocklist-update" method */
 void tr_blocklistSetURL(tr_session*, char const* url);
 

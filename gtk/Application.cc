@@ -562,13 +562,12 @@ void Application::Impl::on_startup()
 
     /* init the ui manager */
     ui_builder_ = Gtk::Builder::create_from_resource(gtr_get_full_resource_path("transmission-ui.xml"s));
-    auto const actions_window = gtr_actions_init_window(ui_builder_, this);
-    auto const actions_torrent = gtr_actions_init_torrent(this);
+    auto const actions = gtr_actions_init(ui_builder_, this);
 
     app_.set_menubar(gtr_action_get_object<Gio::Menu>("main-window-menu"));
 
     /* create main window now to be a parent to any error dialogs */
-    wind_ = MainWindow::create(app_, actions_window, actions_torrent, core_);
+    wind_ = MainWindow::create(app_, actions, core_);
     wind_->signal_size_allocate().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
     app_.hold();
     app_setup();
@@ -1169,7 +1168,9 @@ void Application::Impl::on_prefs_changed(tr_quark const key)
         {
             bool const b = gtr_pref_flag_get(key);
             tr_sessionUseAltSpeed(tr, b);
-            gtr_action_set_toggled(tr_quark_get_string(key), b);
+            auto const key_sv = tr_quark_get_string_view(key);
+            auto const key_ustr = Glib::ustring{ std::data(key_sv), std::size(key_sv) };
+            gtr_action_set_toggled(key_ustr, b);
             break;
         }
 

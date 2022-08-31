@@ -21,7 +21,6 @@
 #include "torrent.h"
 #include "torrents.h"
 #include "tr-assert.h"
-#include "trevent.h"
 #include "utils.h" // tr_time(), tr_formatter
 
 Cache::Key Cache::makeKey(tr_torrent const* torrent, tr_block_info::Location loc) noexcept
@@ -89,8 +88,14 @@ int Cache::writeContiguous(CIter const begin, CIter const end) const
     TR_ASSERT(std::size(buf) == buflen);
 
     // save it
-    auto* const tor = torrents_.get(begin->key.first);
-    auto const loc = tor->blockLoc(begin->key.second);
+    auto const& [torrent_id, block] = begin->key;
+    auto* const tor = torrents_.get(torrent_id);
+    if (tor == nullptr)
+    {
+        return EINVAL;
+    }
+
+    auto const loc = tor->blockLoc(block);
 
     if (auto const err = tr_ioWrite(tor, loc, std::size(buf), std::data(buf)); err != 0)
     {

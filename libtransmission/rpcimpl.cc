@@ -1395,8 +1395,10 @@ static void onBlocklistFetched(tr_web::FetchResponse const& web_response)
     content.resize(1024 * 128);
     for (;;)
     {
-        auto decompressor = std::shared_ptr<libdeflate_decompressor>{ libdeflate_alloc_decompressor(),
-                                                                      libdeflate_free_decompressor };
+        auto decompressor = std::unique_ptr<libdeflate_decompressor, void (*)(libdeflate_decompressor*)>{
+            libdeflate_alloc_decompressor(),
+            libdeflate_free_decompressor
+        };
         auto actual_size = size_t{};
         auto const decompress_result = libdeflate_gzip_decompress(
             decompressor.get(),
@@ -2184,6 +2186,10 @@ static void addSessionField(tr_session const* s, tr_variant* d, tr_quark key)
         tr_variantDictAddBool(d, key, s->allowsPEX());
         break;
 
+    case TR_KEY_tcp_enabled:
+        tr_variantDictAddBool(d, key, s->allowsTCP());
+        break;
+
     case TR_KEY_utp_enabled:
         tr_variantDictAddBool(d, key, s->allowsUTP());
         break;
@@ -2344,8 +2350,7 @@ static char const* sessionGet(tr_session* s, tr_variant* args_in, tr_variant* ar
                 continue;
             }
 
-            auto const field_id = tr_quark_lookup(field_name);
-            if (field_id)
+            if (auto const field_id = tr_quark_lookup(field_name); field_id)
             {
                 addSessionField(s, args_out, *field_id);
             }
