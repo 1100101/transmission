@@ -39,6 +39,7 @@
 #include "torrents.h"
 #include "tr-lpd.h"
 #include "web.h"
+#include "verify.h"
 
 enum tr_auto_switch_state_t
 {
@@ -59,6 +60,13 @@ struct BlocklistFile;
 struct struct_utp_context;
 struct tr_announcer;
 struct tr_announcer_udp;
+
+namespace libtransmission::test
+{
+
+class SessionTest;
+
+} // namespace libtransmission::test
 
 struct tr_bindinfo
 {
@@ -232,7 +240,7 @@ public:
         scripts_enabled_[i] = enabled;
     }
 
-    [[nodiscard]] auto useScript(TrScript i) const
+    [[nodiscard]] constexpr auto useScript(TrScript i) const
     {
         return scripts_enabled_[i];
     }
@@ -274,7 +282,7 @@ public:
 
     [[nodiscard]] bool useRpcWhitelist() const;
 
-    [[nodiscard]] auto externalIP() const noexcept
+    [[nodiscard]] constexpr auto externalIP() const noexcept
     {
         return external_ip_;
     }
@@ -432,12 +440,12 @@ public:
 
     /// stats
 
-    [[nodiscard]] auto& stats() noexcept
+    [[nodiscard]] constexpr auto& stats() noexcept
     {
         return session_stats_;
     }
 
-    [[nodiscard]] auto const& stats() const noexcept
+    [[nodiscard]] constexpr auto const& stats() const noexcept
     {
         return session_stats_;
     }
@@ -518,109 +526,109 @@ public:
     tr_bindinfo bind_ipv4 = tr_bindinfo{ tr_inaddr_any };
     tr_bindinfo bind_ipv6 = tr_bindinfo{ tr_in6addr_any };
 
-    [[nodiscard]] auto constexpr queueEnabled(tr_direction dir) const noexcept
+    [[nodiscard]] constexpr auto queueEnabled(tr_direction dir) const noexcept
     {
         return queue_enabled_[dir];
     }
 
-    [[nodiscard]] auto constexpr queueSize(tr_direction dir) const noexcept
+    [[nodiscard]] constexpr auto queueSize(tr_direction dir) const noexcept
     {
         return queue_size_[dir];
     }
 
-    [[nodiscard]] auto constexpr queueStalledEnabled() const noexcept
+    [[nodiscard]] constexpr auto queueStalledEnabled() const noexcept
     {
         return queue_stalled_enabled_;
     }
 
-    [[nodiscard]] auto constexpr queueStalledMinutes() const noexcept
+    [[nodiscard]] constexpr auto queueStalledMinutes() const noexcept
     {
         return queue_stalled_minutes_;
     }
 
-    [[nodiscard]] auto constexpr peerLimit() const noexcept
+    [[nodiscard]] constexpr auto peerLimit() const noexcept
     {
         return peer_limit_;
     }
 
-    [[nodiscard]] auto constexpr peerLimitPerTorrent() const noexcept
+    [[nodiscard]] constexpr auto peerLimitPerTorrent() const noexcept
     {
         return peer_limit_per_torrent_;
     }
 
-    [[nodiscard]] auto constexpr uploadSlotsPerTorrent() const noexcept
+    [[nodiscard]] constexpr auto uploadSlotsPerTorrent() const noexcept
     {
         return upload_slots_per_torrent_;
     }
 
-    [[nodiscard]] auto constexpr isClosing() const noexcept
+    [[nodiscard]] constexpr auto isClosing() const noexcept
     {
         return is_closing_;
     }
 
-    [[nodiscard]] auto constexpr isClosed() const noexcept
+    [[nodiscard]] constexpr auto isClosed() const noexcept
     {
         return is_closed_;
     }
 
-    [[nodiscard]] auto constexpr encryptionMode() const noexcept
+    [[nodiscard]] constexpr auto encryptionMode() const noexcept
     {
         return encryption_mode_;
     }
 
-    [[nodiscard]] auto constexpr preallocationMode() const noexcept
+    [[nodiscard]] constexpr auto preallocationMode() const noexcept
     {
         return preallocation_mode_;
     }
 
-    [[nodiscard]] auto constexpr shouldScrapePausedTorrents() const noexcept
+    [[nodiscard]] constexpr auto shouldScrapePausedTorrents() const noexcept
     {
         return should_scrape_paused_torrents_;
     }
 
-    [[nodiscard]] auto constexpr shouldPauseAddedTorrents() const noexcept
+    [[nodiscard]] constexpr auto shouldPauseAddedTorrents() const noexcept
     {
         return should_pause_added_torrents_;
     }
 
-    [[nodiscard]] auto constexpr shouldDeleteSource() const noexcept
+    [[nodiscard]] constexpr auto shouldDeleteSource() const noexcept
     {
-        return should_pause_added_torrents_;
+        return should_delete_source_torrents_;
     }
 
-    [[nodiscard]] auto constexpr allowsDHT() const noexcept
+    [[nodiscard]] constexpr auto allowsDHT() const noexcept
     {
         return is_dht_enabled_;
     }
 
-    [[nodiscard]] auto constexpr allowsLPD() const noexcept
+    [[nodiscard]] constexpr auto allowsLPD() const noexcept
     {
         return is_lpd_enabled_;
     }
 
-    [[nodiscard]] auto constexpr allowsPEX() const noexcept
+    [[nodiscard]] constexpr auto allowsPEX() const noexcept
     {
         return is_pex_enabled_;
     }
 
-    [[nodiscard]] auto constexpr allowsTCP() const noexcept
+    [[nodiscard]] constexpr auto allowsTCP() const noexcept
     {
         return is_tcp_enabled_;
     }
 
     [[nodiscard]] bool allowsUTP() const noexcept;
 
-    [[nodiscard]] auto constexpr allowsPrefetch() const noexcept
+    [[nodiscard]] constexpr auto allowsPrefetch() const noexcept
     {
         return is_prefetch_enabled_;
     }
 
-    [[nodiscard]] auto constexpr isIdleLimited() const noexcept
+    [[nodiscard]] constexpr auto isIdleLimited() const noexcept
     {
         return is_idle_limited_;
     }
 
-    [[nodiscard]] auto constexpr idleLimitMinutes() const noexcept
+    [[nodiscard]] constexpr auto idleLimitMinutes() const noexcept
     {
         return idle_limit_minutes_;
     }
@@ -673,7 +681,7 @@ public:
 
     [[nodiscard]] std::optional<unsigned int> activeSpeedLimitBps(tr_direction dir) const noexcept;
 
-    [[nodiscard]] auto isIncompleteFileNamingEnabled() const noexcept
+    [[nodiscard]] constexpr auto isIncompleteFileNamingEnabled() const noexcept
     {
         return is_incomplete_file_naming_enabled_;
     }
@@ -683,7 +691,7 @@ public:
         return is_port_random_;
     }
 
-    [[nodiscard]] auto constexpr isRatioLimited() const noexcept
+    [[nodiscard]] constexpr auto isRatioLimited() const noexcept
     {
         return is_ratio_limited_;
     }
@@ -698,6 +706,22 @@ public:
         return peer_id_ttl_hours_;
     }
 
+    void verifyRemove(tr_torrent* tor)
+    {
+        if (verifier_)
+        {
+            verifier_->remove(tor);
+        }
+    }
+
+    void verifyAdd(tr_torrent* tor)
+    {
+        if (verifier_)
+        {
+            verifier_->add(tor);
+        }
+    }
+
 private:
     [[nodiscard]] tr_port randomPort() const;
 
@@ -710,6 +734,7 @@ private:
     void closeImplWaitForIdleUdp();
     void closeImplFinish();
 
+    friend class libtransmission::test::SessionTest;
     friend bool tr_blocklistExists(tr_session const* session);
     friend bool tr_sessionGetAntiBruteForceEnabled(tr_session const* session);
     friend bool tr_sessionIsRPCEnabled(tr_session const* session);
@@ -754,7 +779,7 @@ private:
     friend void tr_sessionSetRPCUsername(tr_session* session, char const* username);
     friend void tr_sessionSetRatioLimit(tr_session* session, double desired_ratio);
     friend void tr_sessionSetRatioLimited(tr_session* session, bool is_limited);
-    friend void tr_sessionSetSpeedLimit_Bps(tr_session* session, tr_direction dir, unsigned int Bps);
+    friend void tr_sessionSetSpeedLimit_Bps(tr_session* session, tr_direction dir, unsigned int bytes_per_second);
     friend void tr_sessionSetUTPEnabled(tr_session* session, bool enabled);
 
     static std::recursive_mutex session_mutex_;
@@ -887,6 +912,8 @@ private:
     std::unique_ptr<libtransmission::Timer> save_timer_;
 
     tr_torrents torrents_;
+
+    std::unique_ptr<tr_verify_worker> verifier_ = std::make_unique<tr_verify_worker>();
 
     std::array<std::string, TR_SCRIPT_N_TYPES> scripts_;
 

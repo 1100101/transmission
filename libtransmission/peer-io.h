@@ -140,13 +140,23 @@ public:
         return evbuffer_get_length(inbuf.get());
     }
 
+    [[nodiscard]] std::byte const* peek(size_t n_bytes) const noexcept
+    {
+        if (readBufferSize() < n_bytes)
+        {
+            return nullptr;
+        }
+
+        return reinterpret_cast<std::byte const*>(evbuffer_pullup(inbuf.get(), n_bytes));
+    }
+
     void readBufferAdd(void const* data, size_t n_bytes);
 
     int flushOutgoingProtocolMsgs();
     int flush(tr_direction dir, size_t byte_limit);
 
     void writeBytes(void const* writeme, size_t writeme_len, bool is_piece_data);
-    void writeBuf(struct evbuffer* buf, bool isPieceData);
+    void writeBuf(struct evbuffer* buf, bool is_piece_data);
     size_t getWriteBufferSpace(uint64_t now) const;
 
     [[nodiscard]] auto hasBandwidthLeft(tr_direction dir) noexcept
@@ -154,7 +164,7 @@ public:
         return bandwidth_.clamp(dir, 1024) > 0;
     }
 
-    [[nodiscard]] auto getPieceSpeed_Bps(uint64_t now, tr_direction dir) noexcept
+    [[nodiscard]] auto getPieceSpeedBytesPerSecond(uint64_t now, tr_direction dir) noexcept
     {
         return bandwidth_.getPieceSpeedBytesPerSecond(now, dir);
     }

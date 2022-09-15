@@ -87,10 +87,10 @@ constexpr auto tr_saveFile(std::string_view filename, ContiguousRange const& x, 
 void tr_wait_msec(long int delay_milliseconds);
 
 template<typename T, std::enable_if_t<std::is_integral<T>::value, bool> = true>
-[[nodiscard]] std::optional<T> tr_parseNum(std::string_view& sv, int base = 10);
+[[nodiscard]] std::optional<T> tr_parseNum(std::string_view str, std::string_view* setme_remainder = nullptr, int base = 10);
 
 template<typename T, std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
-[[nodiscard]] std::optional<T> tr_parseNum(std::string_view& sv);
+[[nodiscard]] std::optional<T> tr_parseNum(std::string_view str, std::string_view* setme_remainder = nullptr);
 
 #ifdef _WIN32
 
@@ -312,7 +312,7 @@ extern size_t tr_mem_K;
 extern uint64_t tr_size_K; /* unused? */
 
 /* format a speed from KBps into a user-readable string. */
-[[nodiscard]] std::string tr_formatter_speed_KBps(double KBps);
+[[nodiscard]] std::string tr_formatter_speed_KBps(double kilo_per_second);
 
 /* format a memory size from bytes into a user-readable string. */
 [[nodiscard]] std::string tr_formatter_mem_B(size_t bytes);

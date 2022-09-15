@@ -188,20 +188,20 @@ public:
         return tr_torrentFindFromId(session, torrent_id);
     }
 
-    [[nodiscard]] bool isTransferringPieces(uint64_t now, tr_direction direction, unsigned int* setme_Bps) const override
+    [[nodiscard]] bool isTransferringPieces(uint64_t now, tr_direction dir, unsigned int* setme_bytes_per_second) const override
     {
-        unsigned int Bps = 0;
+        unsigned int bytes_per_second = 0;
         bool is_active = false;
 
-        if (direction == TR_DOWN)
+        if (dir == TR_DOWN)
         {
             is_active = !std::empty(tasks);
-            Bps = bandwidth_.getPieceSpeedBytesPerSecond(now, direction);
+            bytes_per_second = bandwidth_.getPieceSpeedBytesPerSecond(now, dir);
         }
 
-        if (setme_Bps != nullptr)
+        if (setme_bytes_per_second != nullptr)
         {
-            *setme_Bps = Bps;
+            *setme_bytes_per_second = bytes_per_second;
         }
 
         return is_active;
@@ -245,35 +245,17 @@ public:
     void gotPieceData(uint32_t n_bytes)
     {
         bandwidth_.notifyBandwidthConsumed(TR_DOWN, n_bytes, true, tr_time_msec());
-        publishClientGotPieceData(n_bytes);
+        publish(tr_peer_event::GotPieceData(n_bytes));
         connection_limiter.gotData();
     }
 
     void publishRejection(tr_block_span_t block_span)
     {
-        auto e = tr_peer_event{};
-        e.eventType = TR_PEER_CLIENT_GOT_REJ;
-
+        auto const* const tor = getTorrent();
         for (auto block = block_span.begin; block < block_span.end; ++block)
         {
-            auto const loc = getTorrent()->blockLoc(block);
-            e.pieceIndex = loc.piece;
-            e.offset = loc.piece_offset;
-            publish(&e);
+            publish(tr_peer_event::GotRejected(tor->blockInfo(), block));
         }
-    }
-
-    void publishGotBlock(tr_torrent const* tor, tr_block_index_t block)
-    {
-        TR_ASSERT(block < tor->blockCount());
-
-        auto const loc = tor->blockLoc(block);
-        auto e = tr_peer_event{};
-        e.eventType = TR_PEER_CLIENT_GOT_BLOCK;
-        e.pieceIndex = loc.piece;
-        e.offset = loc.piece_offset;
-        e.length = tor->blockSize(loc.block);
-        publish(&e);
     }
 
     void requestBlocks(tr_block_span_t const* block_spans, size_t n_spans) override
@@ -315,6 +297,14 @@ public:
         return { n_slots, n_slots * PreferredBlocksPerTask };
     }
 
+    void publish(tr_peer_event const& peer_event)
+    {
+        if (callback != nullptr)
+        {
+            (*callback)(this, peer_event, callback_data);
+        }
+    }
+
     tr_torrent_id_t const torrent_id;
     std::string const base_url;
     tr_peer_callback const callback;
@@ -324,22 +314,6 @@ public:
     std::set<tr_webseed_task*> tasks;
 
 private:
-    void publish(tr_peer_event* event)
-    {
-        if (callback != nullptr)
-        {
-            (*callback)(this, event, callback_data);
-        }
-    }
-
-    void publishClientGotPieceData(uint32_t length)
-    {
-        auto e = tr_peer_event{};
-        e.eventType = TR_PEER_CLIENT_GOT_PIECE_DATA;
-        e.length = length;
-        publish(&e);
-    }
-
     tr_bandwidth bandwidth_;
     std::unique_ptr<libtransmission::Timer> idle_timer;
     static auto constexpr IdleTimerInterval = 2s;
@@ -374,7 +348,7 @@ public:
         if (auto* const tor = tr_torrentFindFromId(session_, tor_id_); tor != nullptr)
         {
             session_->cache->writeBlock(tor_id_, block_, data_);
-            webseed_->publishGotBlock(tor, block_);
+            webseed_->publish(tr_peer_event::GotBlock(tor->blockInfo(), block_));
         }
 
         delete this;
@@ -514,9 +488,9 @@ void onPartialDataFetched(tr_web::FetchResponse const& web_response)
 }
 
 template<typename OutputIt>
-void makeUrl(tr_webseed* w, std::string_view name, OutputIt out)
+void makeUrl(tr_webseed const* const webseed, std::string_view name, OutputIt out)
 {
-    auto const& url = w->base_url;
+    auto const& url = webseed->base_url;
 
     out = std::copy(std::begin(url), std::end(url), out);
 

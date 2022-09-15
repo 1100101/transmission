@@ -127,7 +127,6 @@ protected:
         auto path = tr_sys_dir_get_current(&error);
         if (error != nullptr)
         {
-            std::cerr << "tr_sys_dir_get_current error: '" << error->message << "'" << std::endl;
             tr_error_free(error);
         }
         return path;
@@ -184,9 +183,13 @@ protected:
 
         auto dir = tr_pathbuf{ path };
         dir.popdir();
-        tr_error* error = nullptr;
-        tr_sys_dir_create(dir, TR_SYS_DIR_CREATE_PARENTS, 0700, &error);
-        EXPECT_EQ(nullptr, error) << "path[" << path << "] dir[" << dir << "] " << *error;
+        if (auto const info = tr_sys_path_get_info(path); !info)
+        {
+            tr_error* error = nullptr;
+            tr_sys_dir_create(dir, TR_SYS_DIR_CREATE_PARENTS, 0700, &error);
+            EXPECT_EQ(nullptr, error) << "path[" << path << "] dir[" << dir << "] " << *error;
+            tr_error_clear(&error);
+        }
 
         errno = tmperr;
     }
@@ -377,7 +380,19 @@ protected:
         Complete
     };
 
-    tr_torrent* zeroTorrentInit(ZeroTorrentState state) const
+    [[nodiscard]] tr_torrent* createTorrentAndWaitForVerifyDone(tr_ctor* ctor) const
+    {
+        auto const n_previously_verified = std::size(verified_);
+        auto* const tor = tr_torrentNew(ctor, nullptr);
+        EXPECT_NE(nullptr, tor);
+        waitFor(
+            [this, tor, n_previously_verified]()
+            { return std::size(verified_) > n_previously_verified && verified_.back() == tor; },
+            20s);
+        return tor;
+    }
+
+    [[nodiscard]] tr_torrent* zeroTorrentInit(ZeroTorrentState state) const
     {
         // 1048576 files-filled-with-zeroes/1048576
         //    4096 files-filled-with-zeroes/4096
@@ -442,29 +457,21 @@ protected:
             }
         }
 
-        // create the torrent
-        auto* const tor = tr_torrentNew(ctor, nullptr);
-        EXPECT_NE(nullptr, tor);
-        waitForVerify(tor);
-
-        // cleanup
+        auto* const tor = createTorrentAndWaitForVerifyDone(ctor);
         tr_ctorFree(ctor);
         return tor;
-    }
-
-    void waitForVerify(tr_torrent* tor) const
-    {
-        EXPECT_NE(nullptr, tor->session);
-        tr_wait_msec(100);
-        EXPECT_TRUE(waitFor([tor]() { return tor->verifyState() == TR_VERIFY_NONE && tor->checked_pieces_.hasAll(); }, 4000));
     }
 
     void blockingTorrentVerify(tr_torrent* tor) const
     {
         EXPECT_NE(nullptr, tor->session);
         EXPECT_FALSE(tr_amInEventThread(tor->session));
+        auto const n_previously_verified = std::size(verified_);
         tr_torrentVerify(tor);
-        waitForVerify(tor);
+        waitFor(
+            [this, tor, n_previously_verified]()
+            { return std::size(verified_) > n_previously_verified && verified_.back() == tor; },
+            20s);
     }
 
     tr_session* session_ = nullptr;
@@ -491,6 +498,7 @@ protected:
         SandboxedTest::SetUp();
 
         session_ = sessionInit(settings());
+        session_->verifier_->addCallback([this](tr_torrent* tor, bool /*aborted*/) { verified_.emplace_back(tor); });
     }
 
     virtual void TearDown() override
@@ -501,6 +509,9 @@ protected:
 
         SandboxedTest::TearDown();
     }
+
+private:
+    std::vector<tr_torrent*> verified_;
 };
 
 } // namespace test

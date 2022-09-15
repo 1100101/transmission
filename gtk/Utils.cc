@@ -24,7 +24,6 @@
 #include <libtransmission/version.h> /* SHORT_VERSION_STRING */
 #include <libtransmission/web-utils.h>
 
-#include "HigWorkarea.h"
 #include "Prefs.h"
 #include "PrefsDialog.h"
 #include "Session.h"
@@ -262,8 +261,8 @@ void gtr_add_torrent_error_dialog(Gtk::Widget& child, tr_torrent* duplicate_torr
         *win,
         _("Couldn't open torrent"),
         false,
-        Gtk::MESSAGE_ERROR,
-        Gtk::BUTTONS_CLOSE);
+        TR_GTK_MESSAGE_TYPE(ERROR),
+        TR_GTK_BUTTONS_TYPE(CLOSE));
     w->set_secondary_text(secondary);
     w->signal_response().connect([w](int /*response*/) mutable { w.reset(); });
     w->show_all();
@@ -382,7 +381,7 @@ void gtr_open_uri(Glib::ustring const& uri)
         {
             try
             {
-                Glib::spawn_async({}, std::vector<std::string>{ "xdg-open", uri }, Glib::SPAWN_SEARCH_PATH);
+                Glib::spawn_async({}, std::vector<std::string>{ "xdg-open", uri }, TR_GLIB_SPAWN_FLAGS(SEARCH_PATH));
                 opened = true;
             }
             catch (Glib::SpawnError const&)
@@ -447,6 +446,13 @@ void gtr_combo_box_set_active_enum(Gtk::ComboBox& combo_box, int value)
 
 Gtk::ComboBox* gtr_combo_box_new_enum(std::vector<std::pair<Glib::ustring, int>> const& items)
 {
+    auto w = Gtk::make_managed<Gtk::ComboBox>();
+    gtr_combo_box_set_enum(*w, items);
+    return w;
+}
+
+void gtr_combo_box_set_enum(Gtk::ComboBox& combo, std::vector<std::pair<Glib::ustring, int>> const& items)
+{
     auto store = Gtk::ListStore::create(enum_combo_cols);
 
     for (auto const& [label, value] : items)
@@ -456,12 +462,12 @@ Gtk::ComboBox* gtr_combo_box_new_enum(std::vector<std::pair<Glib::ustring, int>>
         (*iter)[enum_combo_cols.label] = label;
     }
 
-    auto w = Gtk::make_managed<Gtk::ComboBox>(static_cast<Glib::RefPtr<Gtk::TreeModel> const&>(store));
-    auto* r = Gtk::make_managed<Gtk::CellRendererText>();
-    w->pack_start(*r, true);
-    w->add_attribute(r->property_text(), enum_combo_cols.label);
+    combo.clear();
+    combo.set_model(store);
 
-    return w;
+    auto* r = Gtk::make_managed<Gtk::CellRendererText>();
+    combo.pack_start(*r, true);
+    combo.add_attribute(r->property_text(), enum_combo_cols.label);
 }
 
 int gtr_combo_box_get_active_enum(Gtk::ComboBox const& combo_box)
@@ -478,26 +484,44 @@ int gtr_combo_box_get_active_enum(Gtk::ComboBox const& combo_box)
 
 Gtk::ComboBox* gtr_priority_combo_new()
 {
-    return gtr_combo_box_new_enum({
-        { _("High"), TR_PRI_HIGH },
-        { _("Normal"), TR_PRI_NORMAL },
-        { _("Low"), TR_PRI_LOW },
-    });
+    auto w = Gtk::make_managed<Gtk::ComboBox>();
+    gtr_priority_combo_init(*w);
+    return w;
+}
+
+void gtr_priority_combo_init(Gtk::ComboBox& combo)
+{
+    gtr_combo_box_set_enum(
+        combo,
+        {
+            { _("High"), TR_PRI_HIGH },
+            { _("Normal"), TR_PRI_NORMAL },
+            { _("Low"), TR_PRI_LOW },
+        });
 }
 
 /***
 ****
 ***/
 
+namespace
+{
+
 auto const ChildHiddenKey = Glib::Quark("gtr-child-hidden");
+
+} // namespace
 
 void gtr_widget_set_visible(Gtk::Widget& w, bool b)
 {
     /* toggle the transient children, too */
     if (auto const* const window = dynamic_cast<Gtk::Window*>(&w); window != nullptr)
     {
-        for (auto* const l : Gtk::Window::list_toplevels())
+        auto top_levels = Gtk::Window::list_toplevels();
+
+        for (auto top_level_it = top_levels.begin(); top_level_it != top_levels.end();)
         {
+            auto* const l = *top_level_it++;
+
             if (l->get_transient_for() != window)
             {
                 continue;
@@ -517,6 +541,10 @@ void gtr_widget_set_visible(Gtk::Widget& w, bool b)
             {
                 l->set_data(ChildHiddenKey, GINT_TO_POINTER(1));
                 gtr_widget_set_visible(*l, false);
+
+                // Retrieve updated top-levels list in case hiding the window resulted in its destruction
+                top_levels = Gtk::Window::list_toplevels();
+                top_level_it = top_levels.begin();
             }
         }
     }
@@ -545,8 +573,8 @@ void gtr_unrecognized_url_dialog(Gtk::Widget& parent, Glib::ustring const& url)
         *window,
         fmt::format(_("Unsupported URL: '{url}'"), fmt::arg("url", url)),
         false /*use markup*/,
-        Gtk::MESSAGE_ERROR,
-        Gtk::BUTTONS_CLOSE,
+        TR_GTK_MESSAGE_TYPE(ERROR),
+        TR_GTK_BUTTONS_TYPE(CLOSE),
         true /*modal*/);
 
     gstr += fmt::format(_("Transmission doesn't know how to use '{url}'"), fmt::arg("url", url));

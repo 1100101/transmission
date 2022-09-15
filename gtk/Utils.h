@@ -26,6 +26,80 @@
 
 #include "Session.h"
 
+/***
+****
+***/
+
+#ifndef GTKMM_CHECK_VERSION
+#define GTKMM_CHECK_VERSION(major, minor, micro) \
+    (GTKMM_MAJOR_VERSION > (major) || (GTKMM_MAJOR_VERSION == (major) && GTKMM_MINOR_VERSION > (minor)) || \
+     (GTKMM_MAJOR_VERSION == (major) && GTKMM_MINOR_VERSION == (minor) && GTKMM_MICRO_VERSION >= (micro)))
+#endif
+
+#ifndef GLIBMM_CHECK_VERSION
+#define GLIBMM_CHECK_VERSION(major, minor, micro) \
+    (GLIBMM_MAJOR_VERSION > (major) || (GLIBMM_MAJOR_VERSION == (major) && GLIBMM_MINOR_VERSION > (minor)) || \
+     (GLIBMM_MAJOR_VERSION == (major) && GLIBMM_MINOR_VERSION == (minor) && GLIBMM_MICRO_VERSION >= (micro)))
+#endif
+
+#ifndef PANGOMM_CHECK_VERSION
+#define PANGOMM_CHECK_VERSION(major, minor, micro) \
+    (PANGOMM_MAJOR_VERSION > (major) || (PANGOMM_MAJOR_VERSION == (major) && PANGOMM_MINOR_VERSION > (minor)) || \
+     (PANGOMM_MAJOR_VERSION == (major) && PANGOMM_MINOR_VERSION == (minor) && PANGOMM_MICRO_VERSION >= (micro)))
+#endif
+
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+#define IF_GTKMM4(ThenValue, ElseValue) ThenValue
+#else
+#define IF_GTKMM4(ThenValue, ElseValue) ElseValue
+#endif
+
+#if GLIBMM_CHECK_VERSION(2, 68, 0)
+#define IF_GLIBMM2_68(ThenValue, ElseValue) ThenValue
+#else
+#define IF_GLIBMM2_68(ThenValue, ElseValue) ElseValue
+#endif
+
+#if PANGOMM_CHECK_VERSION(2, 48, 0)
+#define IF_PANGOMM2_48(ThenValue, ElseValue) ThenValue
+#else
+#define IF_PANGOMM2_48(ThenValue, ElseValue) ElseValue
+#endif
+
+#define TR_GTK_ALIGN(Code) IF_GTKMM4(Gtk::Align::Code, Gtk::ALIGN_##Code)
+#define TR_GTK_BUTTONS_TYPE(Code) IF_GTKMM4(Gtk::ButtonsType::Code, Gtk::BUTTONS_##Code)
+#define TR_GTK_FILE_CHOOSER_ACTION(Code) IF_GTKMM4(Gtk::FileChooser::Action::Code, Gtk::FILE_CHOOSER_ACTION_##Code)
+#define TR_GTK_MESSAGE_TYPE(Code) IF_GTKMM4(Gtk::MessageType::Code, Gtk::MESSAGE_##Code)
+#define TR_GTK_ORIENTATION(Code) IF_GTKMM4(Gtk::Orientation::Code, Gtk::ORIENTATION_##Code)
+#define TR_GTK_POLICY_TYPE(Code) IF_GTKMM4(Gtk::PolicyType::Code, Gtk::POLICY_##Code)
+#define TR_GTK_RESPONSE_TYPE(Code) IF_GTKMM4(Gtk::ResponseType::Code, Gtk::RESPONSE_##Code)
+#define TR_GTK_SELECTION_MODE(Code) IF_GTKMM4(Gtk::SelectionMode::Code, Gtk::SELECTION_##Code)
+#define TR_GTK_SORT_TYPE(Code) IF_GTKMM4(Gtk::SortType::Code, Gtk::SORT_##Code)
+#define TR_GTK_STATE_FLAGS(Code) IF_GTKMM4(Gtk::StateFlags::Code, Gtk::STATE_FLAG_##Code)
+#define TR_GTK_TREE_VIEW_COLUMN_SIZING(Code) IF_GTKMM4(Gtk::TreeViewColumn::Sizing::Code, Gtk::TREE_VIEW_COLUMN_##Code)
+
+#define TR_GDK_COLORSPACE(Code) IF_GTKMM4(Gdk::Colorspace::Code, Gdk::COLORSPACE_##Code)
+#define TR_GDK_DRAG_ACTION(Code) IF_GTKMM4(Gdk::DragAction::Code, Gdk::ACTION_##Code)
+
+#define TR_GLIB_FILE_TEST(Code) IF_GLIBMM2_68(Glib::FileTest::Code, Glib::FILE_TEST_##Code)
+#define TR_GLIB_NODE_TREE_TRAVERSE_FLAGS(Cls, Code) IF_GLIBMM2_68(Cls::TraverseFlags::Code, Cls::TRAVERSE_##Code)
+#define TR_GLIB_SPAWN_FLAGS(Code) IF_GLIBMM2_68(Glib::SpawnFlags::Code, Glib::SPAWN_##Code)
+#define TR_GLIB_USER_DIRECTORY(Code) IF_GLIBMM2_68(Glib::UserDirectory::Code, Glib::USER_DIRECTORY_##Code)
+
+#define TR_GIO_APP_INFO_CREATE_FLAGS(Code) IF_GLIBMM2_68(Gio::AppInfo::CreateFlags::Code, Gio::APP_INFO_CREATE_##Code)
+#define TR_GIO_APPLICATION_FLAGS(Code) IF_GLIBMM2_68(Gio::Application::Flags::Code, Gio::APPLICATION_##Code)
+#define TR_GIO_DBUS_BUS_TYPE(Code) IF_GLIBMM2_68(Gio::DBus::BusType::Code, Gio::DBus::BUS_TYPE_##Code)
+#define TR_GIO_DBUS_PROXY_FLAGS(Code) IF_GLIBMM2_68(Gio::DBus::ProxyFlags::Code, Gio::DBus::PROXY_FLAGS_##Code)
+#define TR_GIO_FILE_MONITOR_EVENT(Code) IF_GLIBMM2_68(Gio::FileMonitor::Event::Code, Gio::FILE_MONITOR_EVENT_##Code)
+
+#define TR_PANGO_ALIGNMENT(Code) IF_PANGOMM2_48(Pango::Alignment::Code, Pango::ALIGN_##Code)
+#define TR_PANGO_ELLIPSIZE_MODE(Code) IF_PANGOMM2_48(Pango::EllipsizeMode::Code, Pango::ELLIPSIZE_##Code)
+#define TR_PANGO_WEIGHT(Code) IF_PANGOMM2_48(Pango::Weight::Code, Pango::WEIGHT_##Code)
+
+/***
+****
+***/
+
 extern int const mem_K;
 extern char const* const mem_K_str;
 extern char const* const mem_M_str;
@@ -88,10 +162,12 @@ void gtr_dialog_set_content(Gtk::Dialog& dialog, Gtk::Widget& content);
 ***/
 
 Gtk::ComboBox* gtr_priority_combo_new();
+void gtr_priority_combo_init(Gtk::ComboBox& combo);
 #define gtr_priority_combo_get_value(w) gtr_combo_box_get_active_enum(w)
 #define gtr_priority_combo_set_value(w, val) gtr_combo_box_set_active_enum(w, val)
 
 Gtk::ComboBox* gtr_combo_box_new_enum(std::vector<std::pair<Glib::ustring, int>> const& items);
+void gtr_combo_box_set_enum(Gtk::ComboBox& combo, std::vector<std::pair<Glib::ustring, int>> const& items);
 int gtr_combo_box_get_active_enum(Gtk::ComboBox const&);
 void gtr_combo_box_set_active_enum(Gtk::ComboBox&, int value);
 
@@ -228,6 +304,22 @@ struct fmt::formatter<Glib::ustring> : formatter<std::string>
         return formatter<std::string>::format(ustr.raw(), ctx);
     }
 };
+
+template<typename T, typename... ArgTs>
+T* gtr_get_widget(Glib::RefPtr<Gtk::Builder> const& builder, Glib::ustring const& name, ArgTs&&... args)
+{
+    T* widget = nullptr;
+    builder->get_widget(name, widget, std::forward<ArgTs>(args)...);
+    return widget;
+}
+
+template<typename T, typename... ArgTs>
+T* gtr_get_widget_derived(Glib::RefPtr<Gtk::Builder> const& builder, Glib::ustring const& name, ArgTs&&... args)
+{
+    T* widget = nullptr;
+    builder->get_widget_derived(name, widget, std::forward<ArgTs>(args)...);
+    return widget;
+}
 
 namespace Glib
 {

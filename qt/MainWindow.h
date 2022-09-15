@@ -125,7 +125,7 @@ private slots:
 private:
     QIcon addEmblem(QIcon icon, QStringList const& emblem_names) const;
 
-    torrent_ids_t getSelectedTorrents(bool withMetadataOnly = false) const;
+    torrent_ids_t getSelectedTorrents(bool with_metadata_only = false) const;
     void updateNetworkIcon();
 
     QMenu* createOptionsMenu();
@@ -133,7 +133,7 @@ private:
     void initStatusBar();
 
     void clearSelection();
-    void addTorrent(AddData const& add_me, bool show_options);
+    void addTorrent(AddData add_me, bool show_options);
 
     // QWidget
     void hideEvent(QHideEvent* event) override;
