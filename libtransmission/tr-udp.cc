@@ -5,8 +5,7 @@
 #include <array>
 #include <cerrno>
 #include <cstdint>
-#include <cstring> /* memcmp(), memcpy(), memset() */
-#include <cstdlib> /* malloc(), free() */
+#include <cstring> /* memcmp(), memset() */
 
 #ifdef _WIN32
 #include <io.h> /* dup2() */
@@ -105,115 +104,78 @@ void tr_session::tr_udp_core::set_socket_buffers()
     }
 }
 
-/* BEP-32 has a rather nice explanation of why we need to bind to one
-   IPv6 address, if I may say so myself. */
-// TODO: remove goto, it prevents reducing scope of local variables
-void tr_session::tr_udp_core::rebind_ipv6(bool force)
+static tr_socket_t rebind_ipv6_impl(in6_addr sin6_addr, tr_port port)
 {
-    struct sockaddr_in6 sin6;
-    unsigned char const* ipv6 = tr_globalIPv6(&session_);
-    int rc = -1;
-    int one = 1;
-
-    /* We currently have no way to enable or disable IPv6 after initialisation.
-       No way to fix that without some surgery to the DHT code itself. */
-    if (ipv6 == nullptr || (!force && udp6_socket_ == TR_BAD_SOCKET))
+    auto const sock = socket(PF_INET6, SOCK_DGRAM, 0);
+    if (sock == TR_BAD_SOCKET)
     {
-        if (udp6_bound_ != nullptr)
-        {
-            free(udp6_bound_);
-            udp6_bound_ = nullptr;
-        }
-
-        return;
-    }
-
-    if (udp6_bound_ != nullptr && memcmp(ipv6, udp6_bound_, 16) == 0)
-    {
-        return;
-    }
-
-    auto const s = socket(PF_INET6, SOCK_DGRAM, 0);
-
-    if (s == TR_BAD_SOCKET)
-    {
-        goto FAIL;
+        return TR_BAD_SOCKET;
     }
 
 #ifdef IPV6_V6ONLY
-    /* Since we always open an IPv4 socket on the same port, this
-       shouldn't matter.  But I'm superstitious. */
-    (void)setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<char const*>(&one), sizeof(one));
+    /* Since we always open an IPv4 socket on the same port,
+     * this shouldn't matter.  But I'm superstitious. */
+    int one = 1;
+    (void)setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<char const*>(&one), sizeof(one));
 #endif
 
-    memset(&sin6, 0, sizeof(sin6));
+    auto sin6 = sockaddr_in6{};
     sin6.sin6_family = AF_INET6;
-
-    if (ipv6 != nullptr)
+    sin6.sin6_addr = sin6_addr;
+    sin6.sin6_port = port.network();
+    if (::bind(sock, reinterpret_cast<struct sockaddr*>(&sin6), sizeof(sin6)) == -1)
     {
-        memcpy(&sin6.sin6_addr, ipv6, 16);
+        tr_netCloseSocket(sock);
+        return TR_BAD_SOCKET;
     }
 
-    sin6.sin6_port = udp_port_.network();
+    return sock;
+}
 
-    rc = bind(s, (struct sockaddr*)&sin6, sizeof(sin6));
+/* BEP-32 has a rather nice explanation of why we need to bind to one
+   IPv6 address, if I may say so myself. */
+void tr_session::tr_udp_core::rebind_ipv6(bool force)
+{
+    auto const ipv6 = tr_globalIPv6(&session_);
 
-    if (rc == -1)
+    /* We currently have no way to enable or disable IPv6 after initialisation.
+       No way to fix that without some surgery to the DHT code itself. */
+    if (!ipv6 || (!force && udp6_socket_ == TR_BAD_SOCKET))
     {
-        goto FAIL;
+        udp6_bound_.reset();
+        return;
     }
 
-    if (udp6_socket_ == TR_BAD_SOCKET)
+    if (udp6_bound_ && memcmp(&*udp6_bound_, &*ipv6, sizeof(*ipv6)) == 0)
     {
-        udp6_socket_ = s;
-    }
-    else
-    {
-        /* FIXME: dup2 doesn't work for sockets on Windows */
-        rc = dup2(s, udp6_socket_);
-
-        if (rc == -1)
-        {
-            goto FAIL;
-        }
-
-        tr_netCloseSocket(s);
+        return;
     }
 
-    if (udp6_bound_ == nullptr)
+    auto const sock = rebind_ipv6_impl(*ipv6, udp_port_);
+    if (sock == TR_BAD_SOCKET)
     {
-        udp6_bound_ = static_cast<unsigned char*>(malloc(16));
+        /* Something went wrong.  It's difficult to recover, so let's
+         * simply set things up so that we try again next time. */
+        auto const error_code = errno;
+        auto ipv6_readable = std::array<char, INET6_ADDRSTRLEN>{};
+        evutil_inet_ntop(AF_INET6, &*ipv6, std::data(ipv6_readable), std::size(ipv6_readable));
+        tr_logAddWarn(fmt::format(
+            _("Couldn't rebind IPv6 socket {address}: {error} ({error_code})"),
+            fmt::arg("address", std::data(ipv6_readable)),
+            fmt::arg("error", tr_strerror(error_code)),
+            fmt::arg("error_code", error_code)));
+
+        udp6_bound_.reset();
+        return;
     }
 
-    if (udp6_bound_ != nullptr)
+    if (udp6_socket_ != TR_BAD_SOCKET)
     {
-        memcpy(udp6_bound_, ipv6, 16);
+        tr_netCloseSocket(udp6_socket_);
     }
 
-    return;
-
-FAIL:
-    /* Something went wrong.  It's difficult to recover, so let's simply
-       set things up so that we try again next time. */
-    auto const error_code = errno;
-    auto ipv6_readable = std::array<char, INET6_ADDRSTRLEN>{};
-    evutil_inet_ntop(AF_INET6, ipv6, std::data(ipv6_readable), std::size(ipv6_readable));
-    tr_logAddWarn(fmt::format(
-        _("Couldn't rebind IPv6 socket {address}: {error} ({error_code})"),
-        fmt::arg("address", std::data(ipv6_readable)),
-        fmt::arg("error", tr_strerror(error_code)),
-        fmt::arg("error_code", error_code)));
-
-    if (s != TR_BAD_SOCKET)
-    {
-        tr_netCloseSocket(s);
-    }
-
-    if (udp6_bound_ != nullptr)
-    {
-        free(udp6_bound_);
-        udp6_bound_ = nullptr;
-    }
+    udp6_socket_ = sock;
+    udp6_bound_ = ipv6;
 }
 
 static void event_callback(evutil_socket_t s, [[maybe_unused]] short type, void* vsession)
@@ -222,7 +184,7 @@ static void event_callback(evutil_socket_t s, [[maybe_unused]] short type, void*
     TR_ASSERT(type == EV_READ);
 
     auto buf = std::array<unsigned char, 4096>{};
-    struct sockaddr_storage from;
+    auto from = sockaddr_storage{};
     auto* session = static_cast<tr_session*>(vsession);
 
     socklen_t fromlen = sizeof(from);
@@ -243,7 +205,7 @@ static void event_callback(evutil_socket_t s, [[maybe_unused]] short type, void*
             if (session->allowsDHT())
             {
                 buf[rc] = '\0'; /* required by the DHT code */
-                tr_dhtCallback(std::data(buf), rc, (struct sockaddr*)&from, fromlen, vsession);
+                tr_dhtCallback(session, std::data(buf), rc, (struct sockaddr*)&from, fromlen);
             }
         }
         else if (rc >= 8 && buf[0] == 0 && buf[1] == 0 && buf[2] == 0 && buf[3] <= 3)
@@ -289,7 +251,7 @@ tr_session::tr_udp_core::tr_udp_core(tr_session& session)
         sin.sin_family = AF_INET;
         if (!is_default)
         {
-            memcpy(&sin.sin_addr, &public_addr.addr.addr4, sizeof(struct in_addr));
+            sin.sin_addr = public_addr.addr.addr4;
         }
 
         sin.sin_port = udp_port_.network();
@@ -319,7 +281,7 @@ tr_session::tr_udp_core::tr_udp_core(tr_session& session)
 
     // IPV6
 
-    if (tr_globalIPv6(nullptr) != nullptr)
+    if (tr_globalIPv6(nullptr).has_value())
     {
         rebind_ipv6(true);
     }
@@ -352,9 +314,25 @@ tr_session::tr_udp_core::tr_udp_core(tr_session& session)
     }
 }
 
+void tr_session::tr_udp_core::dhtUpkeep()
+{
+    if (tr_dhtEnabled(&session_))
+    {
+        tr_dhtUpkeep(&session_);
+    }
+}
+
+void tr_session::tr_udp_core::dhtUninit()
+{
+    if (tr_dhtEnabled(&session_))
+    {
+        tr_dhtUninit(&session_);
+    }
+}
+
 tr_session::tr_udp_core::~tr_udp_core()
 {
-    tr_dhtUninit(&session_);
+    dhtUninit();
 
     if (udp_socket_ != TR_BAD_SOCKET)
     {
@@ -380,11 +358,7 @@ tr_session::tr_udp_core::~tr_udp_core()
         udp6_event_ = nullptr;
     }
 
-    if (udp6_bound_ != nullptr)
-    {
-        free(udp6_bound_);
-        udp6_bound_ = nullptr;
-    }
+    udp6_bound_.reset();
 }
 
 void tr_session::tr_udp_core::sendto(void const* buf, size_t buflen, struct sockaddr const* to, socklen_t const tolen) const
@@ -397,7 +371,9 @@ void tr_session::tr_udp_core::sendto(void const* buf, size_t buflen, struct sock
         if (udp_socket_ != TR_BAD_SOCKET)
         {
             if (::sendto(udp_socket_, static_cast<char const*>(buf), buflen, 0, to, tolen) == -1)
+            {
                 error = -1;
+            }
         }
         else
         {
@@ -418,7 +394,9 @@ void tr_session::tr_udp_core::sendto(void const* buf, size_t buflen, struct sock
         if (udp6_socket_ != TR_BAD_SOCKET)
         {
             if (::sendto(udp6_socket_, static_cast<char const*>(buf), buflen, 0, to, tolen) == -1)
+            {
                 error = -1;
+            }
         }
         else
         {
