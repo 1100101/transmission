@@ -348,8 +348,8 @@ static auto constexpr Options = std::array<tr_option, 98>{
         true,
         "<speed>" },
       { 'U', "no-uplimit", "Disable max upload speed for the current torrent(s) or globally", "U", false, nullptr },
-      { 830, "utp", "Enable uTP for peer connections", nullptr, false, nullptr },
-      { 831, "no-utp", "Disable uTP for peer connections", nullptr, false, nullptr },
+      { 830, "utp", "Enable µTP for peer connections", nullptr, false, nullptr },
+      { 831, "no-utp", "Disable µTP for peer connections", nullptr, false, nullptr },
       { 'v', "verify", "Verify the current torrent(s)", "v", false, nullptr },
       { 'V', "version", "Show version number and exit", "V", false, nullptr },
       { 'w',
@@ -1751,7 +1751,7 @@ static void printSession(tr_variant* top)
 
         if (tr_variantDictFindBool(args, TR_KEY_utp_enabled, &boolVal))
         {
-            fmt::print("  uTP enabled: {:d}\n", (boolVal ? "Yes" : "No"));
+            fmt::print("  µTP enabled: {:d}\n", (boolVal ? "Yes" : "No"));
         }
 
         if (tr_variantDictFindBool(args, TR_KEY_dht_enabled, &boolVal))
@@ -1955,7 +1955,7 @@ static void printSessionStats(tr_variant* top)
             tr_variantDictFindInt(d, TR_KEY_downloadedBytes, &down) && tr_variantDictFindInt(d, TR_KEY_secondsActive, &secs))
         {
             fmt::print("\nTOTAL\n");
-            fmt::print("  Started %lu times\n", (unsigned long)sessions);
+            fmt::print("  Started {:d} times\n", sessions);
             fmt::print("  Uploaded:   {:s}\n", strlsize(up));
             fmt::print("  Downloaded: {:s}\n", strlsize(down));
             fmt::print("  Ratio:      {:s}\n", strlratio(up, down));
