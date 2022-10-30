@@ -125,7 +125,7 @@ public:
     Buffer& operator=(Buffer&&) = default;
 
     template<typename T>
-    Buffer(T const& data)
+    explicit Buffer(T const& data)
     {
         add(std::data(data), std::size(data));
     }
@@ -137,7 +137,7 @@ public:
 
     [[nodiscard]] auto empty() const noexcept
     {
-        return size() == 0U;
+        return evbuffer_get_length(buf_.get()) == 0;
     }
 
     [[nodiscard]] auto vecs(size_t n_bytes) const
@@ -227,17 +227,18 @@ public:
         drain(size());
     }
 
-    // -1 on error, 0 on eof, >0 on n bytes written
-    auto toSocket(tr_socket_t sockfd, size_t n_bytes, tr_error** error = nullptr)
+    // Returns the number of bytes written. Check `error` for error.
+    size_t toSocket(tr_socket_t sockfd, size_t n_bytes, tr_error** error = nullptr)
     {
         EVUTIL_SET_SOCKET_ERROR(0);
         auto const res = evbuffer_write_atmost(buf_.get(), sockfd, n_bytes);
         auto const err = EVUTIL_SOCKET_ERROR();
-        if (res == -1)
+        if (res >= 0)
         {
-            tr_error_set(error, err, tr_net_strerror(err));
+            return static_cast<size_t>(res);
         }
-        return res;
+        tr_error_set(error, err, tr_net_strerror(err));
+        return 0;
     }
 
     [[nodiscard]] Iovec alloc(size_t n_bytes)
@@ -300,6 +301,12 @@ public:
     void push_back(T ch)
     {
         add(&ch, 1);
+    }
+
+    void addPort(tr_port const& port)
+    {
+        auto nport = port.network();
+        add(&nport, sizeof(nport));
     }
 
     void addUint8(uint8_t uch)

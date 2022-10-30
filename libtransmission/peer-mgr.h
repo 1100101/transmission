@@ -65,6 +65,50 @@ struct tr_pex
     }
 
     template<typename OutputIt>
+    OutputIt toCompact4(OutputIt out) const
+    {
+        return this->addr.toCompact4(out, this->port);
+    }
+
+    template<typename OutputIt>
+    OutputIt toCompact6(OutputIt out) const
+    {
+        return this->addr.toCompact6(out, this->port);
+    }
+
+    template<typename OutputIt>
+    static OutputIt toCompact4(OutputIt out, tr_pex const* pex, size_t n_pex)
+    {
+        for (size_t i = 0; i < n_pex; ++i)
+        {
+            out = pex[i].toCompact4(out);
+        }
+        return out;
+    }
+
+    template<typename OutputIt>
+    static OutputIt toCompact6(OutputIt out, tr_pex const* pex, size_t n_pex)
+    {
+        for (size_t i = 0; i < n_pex; ++i)
+        {
+            out = pex[i].toCompact6(out);
+        }
+        return out;
+    }
+
+    [[nodiscard]] static std::vector<tr_pex> fromCompact4(
+        void const* compact,
+        size_t compact_len,
+        uint8_t const* added_f,
+        size_t added_f_len);
+
+    [[nodiscard]] static std::vector<tr_pex> fromCompact6(
+        void const* compact,
+        size_t compact_len,
+        uint8_t const* added_f,
+        size_t added_f_len);
+
+    template<typename OutputIt>
     [[nodiscard]] OutputIt readable(OutputIt out) const
     {
         return addr.readable(out, port);
@@ -128,18 +172,6 @@ void tr_peerMgrClientSentRequests(tr_torrent* torrent, tr_peer* peer, tr_block_s
 
 void tr_peerMgrAddIncoming(tr_peerMgr* manager, tr_address const& addr, tr_port port, struct tr_peer_socket const socket);
 
-[[nodiscard]] std::vector<tr_pex> tr_peerMgrCompactToPex(
-    void const* compact,
-    size_t compact_len,
-    uint8_t const* added_f,
-    size_t added_f_len);
-
-[[nodiscard]] std::vector<tr_pex> tr_peerMgrCompact6ToPex(
-    void const* compact,
-    size_t compact_len,
-    uint8_t const* added_f,
-    size_t added_f_len);
-
 size_t tr_peerMgrAddPex(tr_torrent* tor, uint8_t from, tr_pex const* pex, size_t n_pex);
 
 void tr_peerMgrSetSwarmIsAllSeeds(tr_torrent* tor);
@@ -175,11 +207,14 @@ void tr_peerMgrOnTorrentGotMetainfo(tr_torrent* tor);
 
 void tr_peerMgrOnBlocklistChanged(tr_peerMgr* mgr);
 
-[[nodiscard]] struct tr_peer_stat* tr_peerMgrPeerStats(tr_torrent const* tor, int* setme_count);
+[[nodiscard]] struct tr_peer_stat* tr_peerMgrPeerStats(tr_torrent const* tor, size_t* setme_count);
 
 [[nodiscard]] tr_webseed_view tr_peerMgrWebseed(tr_torrent const* tor, size_t i);
 
-[[nodiscard]] unsigned int tr_peerGetPieceSpeedBytesPerSecond(tr_peer const* peer, uint64_t now, tr_direction direction);
+[[nodiscard]] tr_bytes_per_second_t tr_peerGetPieceSpeedBytesPerSecond(
+    tr_peer const* peer,
+    uint64_t now,
+    tr_direction direction);
 
 void tr_peerMgrClearInterest(tr_torrent* tor);
 
