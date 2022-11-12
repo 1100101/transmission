@@ -24,7 +24,7 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
     FilterTypeTagTracker = 402,
 };
 
-@interface FilterBarController ()
+@interface FilterBarController ()<NSSearchFieldDelegate>
 
 @property(nonatomic) IBOutlet FilterButton* fNoFilterButton;
 @property(nonatomic) IBOutlet FilterButton* fActiveFilterButton;
@@ -34,11 +34,9 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
 @property(nonatomic) IBOutlet FilterButton* fErrorFilterButton;
 
 @property(nonatomic) IBOutlet NSSearchField* fSearchField;
+@property(nonatomic) IBOutlet NSLayoutConstraint* fSearchFieldMinWidthConstraint;
 
 @property(nonatomic) IBOutlet NSPopUpButton* fGroupsButton;
-
-- (void)updateGroupsButton;
-- (void)updateGroups:(NSNotification*)notification;
 
 @end
 
@@ -135,8 +133,11 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
 
     [self updateGroupsButton];
 
-    //update when groups change
+    // update when groups change
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateGroups:) name:@"UpdateGroups" object:nil];
+
+    // update when filter change
+    self.fSearchField.delegate = self;
 }
 
 - (void)dealloc
@@ -263,6 +264,16 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
     [self.view.window makeFirstResponder:self.fSearchField];
 }
 
+- (void)searchFieldDidStartSearching:(NSSearchField*)sender
+{
+    [self.fSearchFieldMinWidthConstraint animator].constant = 95;
+}
+
+- (void)searchFieldDidEndSearching:(NSSearchField*)sender
+{
+    [self.fSearchFieldMinWidthConstraint animator].constant = 48;
+}
+
 - (void)setSearchType:(id)sender
 {
     NSString* oldFilterType = [NSUserDefaults.standardUserDefaults stringForKey:@"FilterSearchType"];
@@ -349,6 +360,7 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
 {
     if (menu == self.fGroupsButton.menu)
     {
+        //remove all items except first three
         for (NSInteger i = menu.numberOfItems - 1; i >= 3; i--)
         {
             [menu removeItemAtIndex:i];

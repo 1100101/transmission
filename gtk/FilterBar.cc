@@ -4,6 +4,7 @@
 // License text can be found in the licenses/ folder.
 
 #include <algorithm> // std::transform()
+#include <array>
 #include <memory>
 #include <set>
 #include <string>
@@ -37,7 +38,7 @@ public:
 
     TR_DISABLE_COPY_MOVE(Impl)
 
-    Glib::RefPtr<Gtk::TreeModel> get_filter_model() const;
+    [[nodiscard]] Glib::RefPtr<Gtk::TreeModel> get_filter_model() const;
 
 private:
     template<typename T>
@@ -462,7 +463,7 @@ bool test_torrent_activity(tr_torrent* tor, int type)
         return st->activity == TR_STATUS_STOPPED;
 
     case ACTIVITY_FILTER_FINISHED:
-        return st->finished == true;
+        return st->finished;
 
     case ACTIVITY_FILTER_VERIFYING:
         return st->activity == TR_STATUS_CHECK || st->activity == TR_STATUS_CHECK_WAIT;
@@ -510,13 +511,15 @@ bool activity_filter_model_update(Glib::RefPtr<Gtk::ListStore> const& activity_m
 
 Glib::RefPtr<Gtk::ListStore> activity_filter_model_new(Glib::RefPtr<Gtk::TreeModel> const& tmodel)
 {
-    static struct
+    struct FilterTypeInfo
     {
         int type;
         char const* context;
         char const* name;
         Glib::ustring icon_name;
-    } const types[] = {
+    };
+
+    static auto const types = std::array<FilterTypeInfo, 9>({ {
         { ACTIVITY_FILTER_ALL, nullptr, N_("All"), {} },
         { ACTIVITY_FILTER_SEPARATOR, nullptr, nullptr, {} },
         { ACTIVITY_FILTER_ACTIVE, nullptr, N_("Active"), "system-run" },
@@ -526,7 +529,7 @@ Glib::RefPtr<Gtk::ListStore> activity_filter_model_new(Glib::RefPtr<Gtk::TreeMod
         { ACTIVITY_FILTER_FINISHED, nullptr, N_("Finished"), "media-playback-stop" },
         { ACTIVITY_FILTER_VERIFYING, "Verb", NC_("Verb", "Verifying"), "view-refresh" },
         { ACTIVITY_FILTER_ERROR, nullptr, N_("Error"), "dialog-error" },
-    };
+    } });
 
     auto const store = Gtk::ListStore::create(activity_filter_cols);
 
@@ -774,26 +777,26 @@ FilterBar::FilterBar(
     BaseObjectType* cast_item,
     Glib::RefPtr<Gtk::Builder> const& /*builder*/,
     tr_session* session,
-    Glib::RefPtr<Gtk::TreeModel> const& tmodel)
+    Glib::RefPtr<Gtk::TreeModel> const& torrent_model)
     : Glib::ObjectBase(typeid(FilterBar))
     , Gtk::Box(cast_item)
-    , impl_(std::make_unique<Impl>(*this, session, tmodel))
+    , impl_(std::make_unique<Impl>(*this, session, torrent_model))
 {
 }
 
 FilterBar::~FilterBar() = default;
 
-FilterBar::Impl::Impl(FilterBar& widget, tr_session* session, Glib::RefPtr<Gtk::TreeModel> const& tmodel)
+FilterBar::Impl::Impl(FilterBar& widget, tr_session* session, Glib::RefPtr<Gtk::TreeModel> const& torrent_model)
     : widget_(widget)
     , activity_(get_template_child<Gtk::ComboBox>("activity_combo"))
     , tracker_(get_template_child<Gtk::ComboBox>("tracker_combo"))
     , entry_(get_template_child<Gtk::Entry>("text_entry"))
     , show_lb_(get_template_child<Gtk::Label>("show_label"))
 {
-    activity_combo_box_init(activity_, tmodel);
-    tracker_combo_box_init(tracker_, tmodel);
+    activity_combo_box_init(activity_, torrent_model);
+    tracker_combo_box_init(tracker_, torrent_model);
 
-    filter_model_ = Gtk::TreeModelFilter::create(tmodel);
+    filter_model_ = Gtk::TreeModelFilter::create(torrent_model);
     filter_model_row_deleted_tag_ = filter_model_->signal_row_deleted().connect([this](auto const& /*path*/)
                                                                                 { update_count_label_idle(); });
     filter_model_row_inserted_tag_ = filter_model_->signal_row_inserted().connect(

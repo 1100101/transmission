@@ -877,7 +877,7 @@ static tr_announce_request* announce_request_new(
     TR_ASSERT(current_tracker != nullptr);
 
     auto* const req = new tr_announce_request();
-    req->port = announcer->session->peerPort();
+    req->port = announcer->session->advertisedPeerPort();
     req->announce_url = current_tracker->announce_url;
     req->tracker_id = current_tracker->tracker_id;
     req->info_hash = tor->infoHash();
@@ -1594,8 +1594,8 @@ void tr_announcer::upkeep()
 {
     auto const lock = session->unique_lock();
 
-    bool const is_closing = session->isClosed();
-    time_t const now = tr_time();
+    auto const is_closing = session->isClosing();
+    auto const now = tr_time();
 
     /* maybe send out some "stopped" messages for closed torrents */
     flushCloseMessages(this);

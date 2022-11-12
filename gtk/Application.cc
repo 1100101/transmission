@@ -3,6 +3,7 @@
 // License text can be found in the licenses/ folder.
 
 #include <algorithm>
+#include <csignal>
 #include <cstdlib> // exit()
 #include <ctime>
 #include <iterator> // std::back_inserter
@@ -14,9 +15,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-
-#include <locale.h>
-#include <signal.h>
 
 #include <fmt/core.h>
 
@@ -157,9 +155,9 @@ private:
     void on_add_torrent(tr_ctor* ctor);
     void on_prefs_changed(tr_quark key);
 
-    std::vector<tr_torrent_id_t> get_selected_torrent_ids() const;
-    tr_torrent* get_first_selected_torrent() const;
-    counts_data get_selected_torrent_counts() const;
+    [[nodiscard]] std::vector<tr_torrent_id_t> get_selected_torrent_ids() const;
+    [[nodiscard]] tr_torrent* get_first_selected_torrent() const;
+    [[nodiscard]] counts_data get_selected_torrent_counts() const;
 
     void start_all_torrents();
     void pause_all_torrents();
@@ -396,7 +394,7 @@ void Application::Impl::on_main_window_size_allocated()
     bool const is_maximized = gdk_window != nullptr && (gdk_window->get_state() & Gdk::WINDOW_STATE_MAXIMIZED) != 0;
 #endif
 
-    gtr_pref_int_set(TR_KEY_main_window_is_maximized, is_maximized);
+    gtr_pref_flag_set(TR_KEY_main_window_is_maximized, is_maximized);
 
     if (!is_maximized)
     {
@@ -870,7 +868,8 @@ bool Application::Impl::on_drag_data_received(Glib::ValueBase const& value, doub
         open_files(FileListHandler::slist_to_vector(files_value.get(), Glib::OwnershipType::OWNERSHIP_NONE));
         return true;
     }
-    else if (G_VALUE_HOLDS(value.gobj(), StringValue::value_type()))
+
+    if (G_VALUE_HOLDS(value.gobj(), StringValue::value_type()))
     {
         StringValue string_value;
         string_value.init(value.gobj());
