@@ -37,8 +37,6 @@ using FileListHandler = Glib::SListHandler<Glib::RefPtr<Gio::File>>;
 namespace
 {
 
-auto const FileChosenKey = Glib::Quark("file-is-chosen");
-
 class MakeProgressDialog : public Gtk::Dialog
 {
 public:
@@ -83,6 +81,7 @@ class MakeDialog::Impl
 {
 public:
     Impl(MakeDialog& dialog, Glib::RefPtr<Gtk::Builder> const& builder, Glib::RefPtr<Session> const& core);
+    ~Impl() = default;
 
     TR_DISABLE_COPY_MOVE(Impl)
 
@@ -396,7 +395,6 @@ void MakeDialog::Impl::setFilename(std::string_view filename)
 
 void MakeDialog::Impl::onChooserChosen(PathButton* chooser)
 {
-    chooser->set_data(FileChosenKey, GINT_TO_POINTER(true));
     setFilename(chooser->get_filename());
 }
 
@@ -404,14 +402,7 @@ void MakeDialog::Impl::onSourceToggled(Gtk::CheckButton* tb, PathButton* chooser
 {
     if (tb->get_active())
     {
-        if (chooser->get_data(FileChosenKey) != nullptr)
-        {
-            onChooserChosen(chooser);
-        }
-        else
-        {
-            setFilename({});
-        }
+        onChooserChosen(chooser);
     }
 }
 
