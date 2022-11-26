@@ -369,6 +369,9 @@ void tr_sessionGetSettings(tr_session const* session, tr_variant* setme_dictiona
     session->settings_.save(setme_dictionary);
     session->alt_speeds_.save(setme_dictionary);
     session->rpc_server_->save(setme_dictionary);
+
+    tr_variantDictRemove(setme_dictionary, TR_KEY_message_level);
+    tr_variantDictAddInt(setme_dictionary, TR_KEY_message_level, tr_logGetLevel());
 }
 
 static void getSettingsFilename(tr_pathbuf& setme, char const* config_dir, char const* appname)
@@ -1982,13 +1985,9 @@ size_t tr_session::countQueueFreeSlots(tr_direction dir) const noexcept
         }
 
         /* is it stalled? */
-        if (stalled_enabled)
+        if (stalled_enabled && difftime(now, std::max(tor->startDate, tor->activityDate)) >= stalled_if_idle_for_n_seconds)
         {
-            auto const idle_secs = static_cast<size_t>(difftime(now, std::max(tor->startDate, tor->activityDate)));
-            if (idle_secs >= stalled_if_idle_for_n_seconds)
-            {
-                continue;
-            }
+            continue;
         }
 
         ++active_count;
@@ -2173,7 +2172,7 @@ tr_session::tr_session(std::string_view config_dir, tr_variant* settings_dict)
     , timer_maker_{ std::make_unique<libtransmission::EvTimerMaker>(eventBase()) }
     , settings_{ settings_dict }
     , session_id_{ tr_time }
-    , peer_mgr_{ tr_peerMgrNew(this), tr_peerMgrFree }
+    , peer_mgr_{ tr_peerMgrNew(this), &tr_peerMgrFree }
     , rpc_server_{ std::make_unique<tr_rpc_server>(this, settings_dict) }
 {
     now_timer_ = timerMaker().create([this]() { onNowTimer(); });
