@@ -16,6 +16,7 @@
 #include <cstddef> // for std::byte, size_t
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string_view>
 
@@ -108,7 +109,7 @@ private:
 
     static ReadState can_read(tr_peerIo* peer_io, void* vhandshake, size_t* piece);
 
-    static void on_error(tr_peerIo* io, short what, void* vhandshake);
+    static void on_error(tr_peerIo* io, tr_error const&, void* vhandshake);
 
     bool build_handshake_message(tr_peerIo* io, uint8_t* buf) const;
 
@@ -141,13 +142,13 @@ private:
 
     ReadState done(bool is_connected)
     {
-        peer_io_->clearCallbacks();
+        peer_io_->clear_callbacks();
         return fire_done(is_connected) ? READ_LATER : READ_ERR;
     }
 
     [[nodiscard]] auto is_incoming() const noexcept
     {
-        return peer_io_->isIncoming();
+        return peer_io_->is_incoming();
     }
 
     [[nodiscard]] constexpr auto state() const noexcept
@@ -181,7 +182,7 @@ private:
         auto walk = data;
         walk = std::copy(std::begin(public_key), std::end(public_key), walk);
         walk += mediator_->pad(walk, PadMax);
-        io->writeBytes(data, walk - data, false);
+        io->write_bytes(data, walk - data, false);
     }
 
     bool fire_done(bool is_connected);
@@ -247,6 +248,53 @@ private:
     // https://wiki.vuze.com/w/Message_Stream_Encryption
     using vc_t = std::array<std::byte, 8>;
     static auto constexpr VC = vc_t{};
+
+    ///
+
+    static constexpr auto DhPoolMaxSize = size_t{ 32 };
+    static inline auto dh_pool_size_ = size_t{};
+    static inline auto dh_pool_ = std::array<tr_message_stream_encryption::DH, DhPoolMaxSize>{};
+    static inline auto dh_pool_mutex_ = std::mutex{};
+
+    [[nodiscard]] static DH get_dh(Mediator* mediator)
+    {
+        auto lock = std::unique_lock(dh_pool_mutex_);
+
+        if (dh_pool_size_ > 0U)
+        {
+            auto dh = DH{};
+            std::swap(dh, dh_pool_[dh_pool_size_ - 1U]);
+            --dh_pool_size_;
+            return dh;
+        }
+
+        return DH{ mediator->private_key() };
+    }
+
+    static void add_dh(DH&& dh)
+    {
+        auto lock = std::unique_lock(dh_pool_mutex_);
+
+        if (dh_pool_size_ < std::size(dh_pool_))
+        {
+            dh_pool_[dh_pool_size_] = std::move(dh);
+            ++dh_pool_size_;
+        }
+    }
+
+    void maybe_recycle_dh()
+    {
+        // keys are expensive to make, so recycle iff the peer was unreachable
+
+        if (have_read_anything_from_peer_)
+        {
+            return;
+        }
+
+        auto dh = DH{};
+        std::swap(dh_, dh);
+        add_dh(std::move(dh));
+    }
 
     ///
 
