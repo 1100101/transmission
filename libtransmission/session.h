@@ -464,11 +464,6 @@ public:
 
     [[nodiscard]] bool useRpcWhitelist() const;
 
-    [[nodiscard]] constexpr auto externalIP() const noexcept
-    {
-        return external_ip_;
-    }
-
     void setExternalIP(tr_address external_ip)
     {
         external_ip_ = external_ip;
@@ -499,25 +494,6 @@ public:
     [[nodiscard]] constexpr auto peerLimitPerTorrent() const noexcept
     {
         return settings_.peer_limit_per_torrent;
-    }
-
-    [[nodiscard]] constexpr bool incPeerCount() noexcept
-    {
-        if (this->peer_count_ >= this->peerLimit())
-        {
-            return false;
-        }
-
-        ++this->peer_count_;
-        return true;
-    }
-
-    constexpr void decPeerCount() noexcept
-    {
-        if (this->peer_count_ > 0)
-        {
-            --this->peer_count_;
-        }
     }
 
     // bandwidth
@@ -729,6 +705,11 @@ public:
     [[nodiscard]] constexpr auto shouldPauseAddedTorrents() const noexcept
     {
         return !settings_.should_start_added_torrents;
+    }
+
+    [[nodiscard]] constexpr auto shouldFullyVerifyAddedTorrents() const noexcept
+    {
+        return settings_.torrent_added_verify_mode == TR_VERIFY_ADDED_FULL;
     }
 
     [[nodiscard]] constexpr auto shouldDeleteSource() const noexcept
@@ -1063,8 +1044,6 @@ private:
     // e.g. if the public device is a router that chose to use a different
     // port than the one requested by Transmission.
     tr_port advertised_peer_port_;
-
-    uint16_t peer_count_ = 0;
 
     bool is_closing_ = false;
 

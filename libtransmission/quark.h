@@ -370,6 +370,7 @@ enum
     TR_KEY_torrent_added,
     TR_KEY_torrent_added_notification_command,
     TR_KEY_torrent_added_notification_enabled,
+    TR_KEY_torrent_added_verify_mode,
     TR_KEY_torrent_complete_notification_command,
     TR_KEY_torrent_complete_notification_enabled,
     TR_KEY_torrent_complete_sound_command,
@@ -420,6 +421,7 @@ enum
     TR_KEY_watch_dir_enabled,
     TR_KEY_webseeds,
     TR_KEY_webseedsSendingToUs,
+    TR_KEY_yourip,
     TR_N_KEYS
 };
 
