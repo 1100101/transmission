@@ -1,4 +1,4 @@
-// This file Copyright © 2010-2022 Mnemosyne LLC.
+// This file Copyright © 2010-2023 Mnemosyne LLC.
 // It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
@@ -226,9 +226,7 @@ void tr_logFreeQueue(tr_log_message* freeme)
     }
 }
 
-/**
-***
-**/
+// ---
 
 char* tr_logGetTimeStr(char* buf, size_t buflen)
 {

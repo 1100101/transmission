@@ -1,4 +1,4 @@
-// This file Copyright © 2015-2022 Transmission authors and contributors.
+// This file Copyright © 2015-2023 Transmission authors and contributors.
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
@@ -209,6 +209,8 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
     self.window.toolbar = toolbar;
 
     [self setWindowSize];
+    [self.window center];
+
     [self setPrefView:nil];
 
     //set special-handling of magnet link add window checkbox

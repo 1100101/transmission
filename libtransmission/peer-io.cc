@@ -1,4 +1,4 @@
-// This file Copyright © 2007-2022 Mnemosyne LLC.
+// This file Copyright © 2007-2023 Mnemosyne LLC.
 // It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
@@ -25,7 +25,7 @@
 #include "peer-io.h"
 #include "tr-assert.h"
 #include "tr-utp.h"
-#include "utils.h"
+#include "utils.h" // for _()
 
 #ifdef _WIN32
 #undef EAGAIN
@@ -130,7 +130,15 @@ std::shared_ptr<tr_peerIo> tr_peerIo::new_outgoing(
 
     auto peer_io = tr_peerIo::create(session, parent, &info_hash, false, is_seed);
 
+    // try a TCP socket
+    if (auto sock = tr_netOpenPeerSocket(session, addr, port, is_seed); sock.is_valid())
+    {
+        peer_io->set_socket(std::move(sock));
+        return peer_io;
+    }
+
 #ifdef WITH_UTP
+    // try a UTP socket
     if (utp)
     {
         auto* const sock = utp_create_socket(session->utp_context);
@@ -144,15 +152,6 @@ std::shared_ptr<tr_peerIo> tr_peerIo::new_outgoing(
         }
     }
 #endif
-
-    if (!peer_io->socket_.is_valid())
-    {
-        if (auto sock = tr_netOpenPeerSocket(session, addr, port, is_seed); sock.is_valid())
-        {
-            peer_io->set_socket(std::move(sock));
-            return peer_io;
-        }
-    }
 
     return {};
 }
@@ -603,7 +602,7 @@ void tr_peerIo::read_bytes(void* bytes, size_t byte_count)
 {
     TR_ASSERT(read_buffer_size() >= byte_count);
 
-    inbuf_.toBuf(bytes, byte_count);
+    inbuf_.to_buf(bytes, byte_count);
 
     if (is_encrypted())
     {
@@ -660,7 +659,7 @@ void tr_peerIo::on_utp_state_change(int state)
     else if (state == UTP_STATE_EOF)
     {
         tr_error* error = nullptr;
-        tr_error_set(&error, ENOTCONN, tr_strerror(ENOTCONN));
+        tr_error_set_from_errno(&error, ENOTCONN);
         call_error_callback(*error);
         tr_error_clear(&error);
     }

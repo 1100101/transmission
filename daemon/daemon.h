@@ -1,4 +1,4 @@
-// This file Copyright © 2015-2022 Mnemosyne LLC.
+// This file Copyright © 2015-2023 Mnemosyne LLC.
 // It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
@@ -47,6 +47,7 @@ private:
     bool seen_hup_ = false;
     std::string config_dir_;
     tr_variant settings_ = {};
+    bool logfile_flush_ = false;
     tr_session* my_session_ = nullptr;
     char const* log_file_name_ = nullptr;
     struct event_base* ev_base_ = nullptr;

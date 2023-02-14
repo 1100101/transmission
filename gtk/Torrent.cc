@@ -1,4 +1,4 @@
-// This file Copyright © 2022 Mnemosyne LLC.
+// This file Copyright © 2022-2023 Mnemosyne LLC.
 // It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
@@ -58,7 +58,7 @@ unsigned int build_torrent_trackers_hash(tr_torrent const& torrent)
     {
         for (auto const ch : std::string_view{ tr_torrentTracker(&torrent, i).announce })
         {
-            hash = (hash << 4) ^ (hash >> 28) ^ ch;
+            hash = (hash << 4U) ^ (hash >> 28U) ^ static_cast<unsigned char>(ch);
         }
     }
 

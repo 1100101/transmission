@@ -1,4 +1,4 @@
-// This file Copyright © 2010 Juliusz Chroboczek.
+// This file Copyright © 2010-2023 Juliusz Chroboczek.
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
@@ -81,7 +81,7 @@ auto constexpr UtpInterval = 50ms;
 void utp_on_accept(tr_session* const session, UTPSocket* const utp_sock)
 {
     auto from_storage = sockaddr_storage{};
-    auto* const from = (struct sockaddr*)&from_storage;
+    auto* const from = reinterpret_cast<sockaddr*>(&from_storage);
     socklen_t fromlen = sizeof(from_storage);
 
     if (!session->allowsUTP() || tr_peer_socket::limit_reached(session))
