@@ -1206,7 +1206,7 @@ void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
     {
         on_metainfo_completed(tor);
     }
-    else if (tor->start_when_stable || !has_metainfo)
+    else if (tor->start_when_stable)
     {
         auto opts = torrent_start_opts{};
         opts.bypass_queue = !has_metainfo; // to fetch metainfo from peers
@@ -1491,7 +1491,6 @@ tr_stat const* tr_torrentStat(tr_torrent* tor)
     using namespace stat_helpers;
 
     TR_ASSERT(tr_isTorrent(tor));
-    auto const lock = tor->unique_lock();
 
     auto const now = tr_time_msec();
     auto const now_sec = tr_time();
@@ -2415,8 +2414,17 @@ void tr_torrentGotBlock(tr_torrent* tor, tr_block_index_t block)
     tor->setDirty();
 
     tor->completion.addBlock(block);
-    if (auto const piece = tor->blockLoc(block).piece; tor->hasPiece(piece))
+
+    auto const block_loc = tor->blockLoc(block);
+    auto const first_piece = block_loc.piece;
+    auto const last_piece = tor->byteLoc(block_loc.byte + tor->blockSize(block) - 1).piece;
+    for (auto piece = first_piece; piece <= last_piece; ++piece)
     {
+        if (!tor->hasPiece(piece))
+        {
+            continue;
+        }
+
         if (tor->checkPiece(piece))
         {
             onPieceCompleted(tor, piece);
