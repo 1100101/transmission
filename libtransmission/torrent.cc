@@ -911,6 +911,22 @@ void tr_torrent::init(tr_ctor const& ctor)
     {
         auto const& dir = ctor.incomplete_dir();
         incomplete_dir_ = !std::empty(dir) ? dir : session->incompleteDir();
+
+        tr_logAddInfo(fmt::format(_("Default download dir: {path}"), fmt::arg("path", session->downloadDir())));
+        tr_logAddInfoTor(this, fmt::format(_("Torrent download dir: '{path}'"), fmt::arg("path", download_dir())));
+        /* If a download dir other than the default was specified,
+         ** don't use the incomplete dir.
+         */
+        if (download_dir() == session->downloadDir())
+        {
+            tr_logAddInfoTor(this, fmt::format(_("No special download dir specified --> use incomplete dir '{path}'"),
+                          fmt::arg("path", download_dir())));
+        }
+        else
+        {
+            tr_logAddInfoTor(this, _("Explicit download dir specified --> DON'T use incomplete dir"));
+            incomplete_dir_.clear();
+        }
     }
 
     bandwidth().set_parent(&session->top_bandwidth_);
